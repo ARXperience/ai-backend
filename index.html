@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Asistente • Centro Digital de Diseño</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#fdfdfd; --surface:#ffffff; --user:#e8edf3; --border:#d0d7e2;
+      --text:#1a1f29; --muted:#6b7280; --accent:#10a37f;
+      --code-bg:#f5f7fa; --code-br:#e1e6ef;
+      --maxw:720px; --radius:18px;
+      --rainbow:linear-gradient(90deg,#ff6ec4,#7873f5,#4adede,#3bf686,#f9f871,#ffb86b,#ff6ec4);
+    }
+    [data-theme="dark"]{
+      --bg:#0b0f14; --surface:#111827; --user:#1f2937; --border:#232b35;
+      --text:#e7edf3; --muted:#93a6bb; --accent:#10a37f;
+      --code-bg:#0b1016; --code-br:#1b2430;
+    }
+
+    @keyframes moveGradient { 0% { background-position:0% 50% } 100% { background-position:200% 50% } }
+    @keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+
+    body{
+      margin:0;background:var(--bg);color:var(--text);
+      font-family:Inter,system-ui,sans-serif;
+      display:flex;flex-direction:column;height:100vh;
+      transition:background .3s,color .3s
+    }
+
+    .top{
+      padding:12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);
+      position:relative;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent 60%);
+    }
+    .top::after{
+      content:"";position:absolute;left:0;right:0;bottom:0;height:2px;
+      background:var(--rainbow);
+      background-size:200% 200%;
+      animation:moveGradient 8s linear infinite;
+      opacity:.7;filter:saturate(.9) blur(.3px);
+    }
+
+    .brand{
+      width:28px;height:28px;border-radius:8px;display:grid;place-items:center;
+      background:var(--rainbow);
+      background-size:200% 200%;animation:moveGradient 8s linear infinite;
+      font-weight:800;color:#0b0f14;
+      box-shadow:0 0 0 1px #0002 inset, 0 1px 6px rgba(0,0,0,.15);
+    }
+    .title{font-weight:700}
+
+    .wrap{flex:1;display:flex;justify-content:center;overflow:auto}
+    .col{width:100%;max-width:var(--maxw);padding:16px;display:flex;flex-direction:column}
+    .messages{flex:1;display:flex;flex-direction:column;gap:12px;padding-bottom:10px}
+
+    .row{display:flex;gap:10px}
+    .avatar{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700}
+    .assistant .avatar{background:#0a201a;color:#9dd8ff;border:1px solid #163a31}
+    [data-theme="light"] .assistant .avatar{background:#eefaff;color:#3a6;border:1px solid #cde}
+    .user{justify-content:flex-end}
+    .user .avatar{order:2;background:#1b2430;color:#fff;border:1px solid #2a3442}
+    [data-theme="light"] .user .avatar{background:#cbd5e1;color:#000;border:1px solid #b4becd}
+
+    .bubble{
+      max-width:80%;padding:12px 14px;border-radius:var(--radius);line-height:1.55;border:1px solid var(--border)
+    }
+    .assistant .bubble{
+      background: var(--surface);
+      border: 2px solid transparent;
+      background-clip: padding-box, border-box;
+      background-origin: border-box;
+      background-image:
+        linear-gradient(var(--surface), var(--surface)),
+        var(--rainbow);
+      background-size: 200% 200%;
+      animation:moveGradient 12s linear infinite;
+      box-shadow: 0 0 0 1px #0001 inset, 0 8px 20px rgba(0,0,0,.08);
+    }
+    .user .bubble{
+      background: var(--user);
+      border-color:var(--border);
+      box-shadow: 0 0 0 1px #0002 inset;
+    }
+
+    .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+    .chip{
+      padding:6px 12px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--text);cursor:pointer;
+      transition:.2s transform, .2s border-color, .2s background-color;
+    }
+    .chip:hover{transform:translateY(-1px);border-color:#2f3a46;background:#0e141b}
+    [data-theme="light"] .chip:hover{background:#f3f4f6}
+
+    .composer-wrap{padding:12px;border-top:1px solid var(--border);background:#f9fafb}
+    [data-theme="dark"] .composer-wrap{background:#0e141b}
+    .composer{max-width:var(--maxw);margin:0 auto;display:flex;gap:8px}
+    .input{flex:1;border:1px solid var(--border);border-radius:14px;padding:12px;color:var(--text);background:#fdfdfd;outline:none}
+    [data-theme="dark"] .input{background:#0f1720}
+    .send{
+      background:var(--accent);border:none;padding:0 18px;border-radius:12px;font-weight:700;cursor:pointer;color:#fff;
+      box-shadow:0 8px 18px rgba(16,163,127,.22);
+    }
+
+    /* Markdown */
+    .bubble h1,.bubble h2,.bubble h3{margin:6px 0 8px;font-weight:700}
+    .bubble h1{font-size:18px}.bubble h2{font-size:16px}.bubble h3{font-size:15px}
+    .bubble p{margin:8px 0}
+    .bubble ul{margin:8px 0 8px 18px}
+    .bubble code{font-family:"JetBrains Mono",ui-monospace,monospace;background:var(--code-bg);border:1px solid var(--code-br);padding:2px 6px;border-radius:8px}
+    pre{background:var(--code-bg);border:1px solid var(--code-br);padding:12px;border-radius:12px;overflow:auto;margin:8px 0}
+    pre code{background:none;border:none;padding:0;white-space:pre-wrap}
+
+    .code-head{display:flex;justify-content:space-between;align-items:center;margin-top:6px;color:var(--muted);font-size:12px}
+    .copy{border:1px solid var(--border);background:transparent;color:var(--text);border-radius:10px;padding:6px 10px;cursor:pointer}
+
+    .typing{display:none;align-items:center;gap:8px;color:var(--muted);font-size:14px;margin:4px 0 0 38px}
+    .dot{width:6px;height:6px;border-radius:50%;background:var(--muted);opacity:.6;animation:blink 1.2s infinite}
+    .dot:nth-child(2){animation-delay:.2s}.dot:nth-child(3){animation-delay:.4s}
+
+    .bar{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+    .ghost-sm{
+      border:1px solid var(--border);
+      background:transparent;
+      color:var(--text);
+      padding:6px 10px;
+      border-radius:10px;
+      font-size:13px;
+      cursor:pointer;
+    }
+
+    /* Botón tema arcoíris */
+    #themeToggle{
+      position: relative;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      background:
+        linear-gradient(var(--surface), var(--surface)) padding-box,
+        var(--rainbow) border-box;
+      background-size: 200% 200%;
+      animation: moveGradient 8s linear infinite;
+      color: var(--text);
+      box-shadow: 0 1px 6px rgba(0,0,0,.08);
+      transition: transform .15s ease, filter .15s ease;
+    }
+    [data-theme="dark"] #themeToggle{ box-shadow: 0 1px 6px rgba(0,0,0,.35); }
+    #themeToggle:hover{ transform: translateY(-1px); filter: brightness(1.03); }
+    #themeToggle:active{ transform: translateY(0); filter: brightness(.98); }
+    #themeToggle:focus-visible{
+      outline:none;
+      box-shadow:0 0 0 3px rgba(71,178,255,.18);
+    }
+
+    /* ===== Overlay de INTRO: bola de humo con borde difuminado ===== */
+    .intro-overlay{
+      position:fixed; inset:0; z-index:9999;
+      display:flex; align-items:center; justify-content:center;
+      background:#fff;           /* fondo blanco puro */
+      pointer-events:none; 
+      opacity:1;                 /* visible al cargar */
+      transition:opacity .8s ease;
+    }
+    .intro-overlay.hide{ opacity:0 }  /* transición de salida */
+    .intro-video{
+      width:min(84vmin, 720px);
+      height:min(84vmin, 720px);
+      object-fit:cover;
+      /* Borde DIFUMINADO (sin sombra) */
+      -webkit-mask-image: radial-gradient(circle at 50% 50%, rgba(0,0,0,1) 66%, rgba(0,0,0,0) 84%);
+      mask-image: radial-gradient(circle at 50% 50%, rgba(0,0,0,1) 66%, rgba(0,0,0,0) 84%);
+    }
+    @media (max-width: 767px){
+      .intro-video{ width:min(86vmin, 540px); height:min(86vmin, 540px); }
+    }
+    @media (prefers-reduced-motion: reduce){
+      .intro-overlay{ display:none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div class="brand">AI</div>
+    <div class="title">Asistente Centro Digital de Diseño</div>
+  </div>
+
+  <div class="wrap">
+    <div class="col">
+      <div class="bar">
+        <button id="clear" class="ghost-sm">🧹 Limpiar chat</button>
+        <button id="themeToggle" class="ghost-sm">🌙 Tema</button>
+        <!-- Botones de voz -->
+        <button id="micToggle" class="ghost-sm" title="Dictar por voz">🎙️ Voz</button>
+        <button id="ttsToggle" class="ghost-sm" title="Leer respuestas">🔊 Lectura</button>
+        <span style="color:var(--muted);font-size:13px">El historial se guarda en este navegador.</span>
+      </div>
+
+      <div id="messages" class="messages"></div>
+      <div id="typing" class="typing" aria-live="polite">
+        <span>Escribiendo</span><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+      </div>
+
+      <div class="chips">
+        <button class="chip" data-q="¿Qué servicios ofrecen?">Servicios</button>
+        <button class="chip" data-q="¿Diseñan páginas web y tiendas?">Páginas web</button>
+        <button class="chip" data-q="¿Automatizan WhatsApp y ManyChat?">Automatizaciones</button>
+        <button class="chip" data-q="¿Cómo cotizo?">Cotización</button>
+        <!-- NUEVOS CHIPS -->
+        <button class="chip" data-q="Quiero crear un agente gratis">Agente gratis</button>
+        <button class="chip" data-q="Agendar llamada">Agendar llamada</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="composer-wrap">
+    <div class="composer">
+      <input id="input" class="input" placeholder="Escribe tu mensaje…" />
+      <button id="micComposer" class="ghost-sm" title="Hablar">🎙️</button>
+      <button id="send" class="send">Enviar</button>
+    </div>
+  </div>
+
+  <!-- ===== INTRO: elige video según dispositivo (pantalla completa con bola centrada) ===== -->
+  <div id="intro" class="intro-overlay" aria-hidden="true">
+    <video id="introVideo" class="intro-video" autoplay muted playsinline preload="auto">
+      <source src="assets/Intro.webm" type="video/webm" media="(min-width:768px)">
+      <source src="assets/Antro.webm" type="video/webm" media="(max-width:767px)">
+    </video>
+  </div>
+
+  <!-- Tu lógica del asistente -->
+  <script src="bot.js"></script>
+
+  <!-- Tema + Intro control -->
+  <script>
+    // Toggle de tema (claro predeterminado)
+    (function(){
+      const btn = document.getElementById('themeToggle');
+      btn.addEventListener('click', () => {
+        const curr = document.documentElement.getAttribute('data-theme');
+        const next = curr === 'light' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', next);
+        btn.textContent = next === 'light' ? '🌙 Tema' : '☀️ Tema';
+      });
+    })();
+
+    // Intro overlay: ocultar al terminar o por timeout
+    (function(){
+      const overlay = document.getElementById('intro');
+      const video   = document.getElementById('introVideo');
+      const reduce  = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!overlay || !video || reduce){ if (overlay) overlay.remove(); return; }
+
+      video.muted = true;
+      // Intento de reproducción (algunos navegadores móviles requieren interacción)
+      video.play().catch(()=>{});
+
+      // Timeout de seguridad por si 'ended' no dispara
+      const SAFE_TIMEOUT_MS = 6500; // ajusta a la duración real de tus clips
+      const t = setTimeout(hideIntro, SAFE_TIMEOUT_MS);
+
+      video.addEventListener('ended', hideIntro);
+      video.addEventListener('error', hideIntro);
+
+      function hideIntro(){
+        clearTimeout(t);
+        if (!overlay) return;
+        overlay.classList.add('hide');
+        setTimeout(()=> overlay.remove(), 700);
+      }
+    })();
+  </script>
+</body>
+</html>
