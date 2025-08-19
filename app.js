@@ -1,4 +1,4 @@
-/* app.js – Studio Chatbot v2 (GENÉRICO con Wizard JSONL)
+/* app.js – Studio Chatbot v2 (GENÉRICO con Wizard JSONL FIXED)
    - RAG TF-IDF + coseno (archivos/URLs + meta: objetivo/notas/sistema)
    - Q&A via *.jsonl ({q,a,src})
    - Fallback opcional a backend IA (historial + contexto)
@@ -22,7 +22,7 @@ const state = {
 };
 let ingestBusy = false;
 
-/* ===================== Tipos ===================== */
+/* ===================== Tipos (JSDoc) ===================== */
 /** @typedef {{id:string, type:'file'|'url'|'meta', title:string, href?:string, addedAt:number}} Source */
 /** @typedef {{id:string, sourceId:string, title:string, text:string, chunks:Array<Chunk>, meta?:boolean}} Doc */
 /** @typedef {{id:string, text:string, vector:Map<string, number>}} Chunk */
@@ -102,7 +102,7 @@ function chunkText(text, chunkSize=1200, overlap=120){
 
 /* ======== “Meta-doc”: Objetivo/Notas/Sistema influye la búsqueda ======== */
 function upsertMetaDoc(){
-  // elimina meta-doc anterior
+  // Elimina meta-doc anterior
   state.docs = state.docs.filter(d=> !d.meta);
   state.sources = state.sources.filter(s=> s.type!=='meta');
 
@@ -120,18 +120,18 @@ function upsertMetaDoc(){
 
 /* ===================== Índice ===================== */
 function buildIndex(){
-  // asegúrate de incluir meta-doc
+  // asegura incluir meta-doc
   upsertMetaDoc();
 
   const vocab = new Map();
-  const allChunks = [];
+  const all = []; // {id,text,vector,_doc}
   state.docs.forEach(doc=>{
     if (!doc.chunks?.length) {
       const cks = chunkText(doc.text);
       doc.chunks = cks.map((t,i)=>({id:`${doc.id}#${i}`, text:t, vector:new Map()}));
     }
     doc.chunks.forEach(ch=>{
-      allChunks.push({ ...ch, _doc:doc });
+      all.push({ ...ch, _doc:doc });
       const seen = new Set();
       tokens(ch.text).forEach(tok=>{
         if (!seen.has(tok)){
@@ -142,14 +142,14 @@ function buildIndex(){
     });
   });
 
-  const N = allChunks.length || 1;
+  const N = all.length || 1;
   const idf = new Map();
   for (const [term, df] of vocab){
     idf.set(term, Math.log((N+1)/(df+1))+1);
   }
 
-  allChunks.forEach(obj=>{
-    const ch = obj; // {text, vector, _doc}
+  all.forEach(obj=>{
+    const ch = obj;
     const tf = new Map();
     const toks = tokens(ch.text);
     toks.forEach(t=> tf.set(t, (tf.get(t)||0)+1));
@@ -163,7 +163,7 @@ function buildIndex(){
 
   // Re-ensambla chunks dentro de cada doc
   state.docs.forEach(doc=>{
-    doc.chunks = allChunks.filter(x=> x._doc.id===doc.id)
+    doc.chunks = all.filter(x=> x._doc.id===doc.id)
       .map(x=>({ id:x.id, text:x.text, vector:x.vector }));
   });
 
@@ -443,37 +443,29 @@ function exportStandaloneHtml() {
 
 /* ===================== Wizard JSONL (FIXED) ===================== */
 
-/** Utilidad: muestra mensajes cortos */
+/** Utilidad: mensajes */
 function msg(txt){ alert(txt); }
 
-/** Parser robusto para FAQs.
- * Acepta líneas:
- *  - "¿Cómo compro?|Añade al carrito..."
- *  - "Cómo compro? | Añade al carrito..."
- *  - "Cómo compro | Añade al carrito..."
- */
+/** Parser robusto para FAQs: "¿Pregunta?|Respuesta", "Pregunta? | Respuesta", "Pregunta | Respuesta" */
 function parseFaqLine(line){
   const raw = line.trim();
   if (!raw) return null;
-  // Divide por "|" con o sin espacios
   const parts = raw.split(/\s*\|\s*/);
   if (parts.length < 2) return null;
 
   let q = (parts[0]||"").trim();
-  let a = (parts.slice(1).join(" | ")||"").trim(); // por si la respuesta contiene "|"
+  let a = (parts.slice(1).join(" | ")||"").trim();
 
   if (!q || !a) return null;
 
-  // Normaliza signos de interrogación (si no tiene "?" final, lo añadimos)
-  const hasQuestion = /[¿?]/.test(q);
-  if (!/[?]$/.test(q)) q = q.replace(/\?+$/,''); // limpia "???" raros
-  if (!/\?$/.test(q)) q = q + (hasQuestion ? "" : "?");
+  const hadQMark = /[¿?]/.test(q);
+  q = q.replace(/\?+$/,'');
+  if (!/\?$/.test(q)) q = q + (hadQMark ? "" : "?");
 
-  // Asegura que si empieza sin "¿", no pasa nada; si quieres forzarlo, puedes añadirlo aquí
   return { q, a, src:"faq" };
 }
 
-/** Toma campos del asistente y genera pares Q&A */
+/** Genera pares Q&A desde el wizard */
 function pairsFromWizard(){
   const name = ($("w_name")?.value||"").trim();
   const tone = ($("w_tone")?.value||"").trim() || "Cercano y profesional.";
@@ -494,7 +486,6 @@ function pairsFromWizard(){
       src: "perfil"
     });
   } else {
-    // Sin nombre/desc → al menos un par base para que no quede vacío
     pairs.push({
       q: "¿Qué hace esta empresa?",
       a: "Ayudamos a clientes con sus necesidades principales. Puedo orientarte en precios, procesos y soporte.",
@@ -512,13 +503,11 @@ function pairsFromWizard(){
 
   if (policies) pairs.push({ q:"¿Cuáles son las políticas de garantía, cambios y tiempos?", a:policies, src:"políticas" });
 
-  // FAQs: tolerante
   faqsLines.forEach(line=>{
     const parsed = parseFaqLine(line);
     if (parsed) pairs.push(parsed);
   });
 
-  // Si quedó completamente vacío, rellena desde Objetivo/Notas
   if (!pairs.length){
     pairs.push(...pairsFromProfile());
   }
@@ -526,7 +515,7 @@ function pairsFromWizard(){
   return pairs;
 }
 
-/** Genera pares rápidos a partir de Objetivo/Notas del perfil actual */
+/** Pares rápidos desde Objetivo/Notas */
 function pairsFromProfile(){
   const goal = (state.bot.goal||"").trim();
   const notes = (state.bot.notes||"").trim();
@@ -545,7 +534,7 @@ function jsonlString(pairs){
   return pairs.map(p=>JSON.stringify(p)).join("\n");
 }
 
-/** Descarga un archivo .jsonl */
+/** Descarga .jsonl */
 function downloadJsonl(pairs, name="dataset_chatbot.jsonl"){
   if (!pairs.length){ msg("No hay pares para descargar."); return; }
   const blob = new Blob([jsonlString(pairs)], {type:"application/jsonl;charset=utf-8"});
@@ -561,7 +550,7 @@ function downloadJsonl(pairs, name="dataset_chatbot.jsonl"){
 function addPairsToProject(pairs){
   if (!pairs.length){ msg("No hay pares para agregar."); return; }
   state.qa.push(...pairs);
-  // También lo metemos como texto indexable para el RAG
+  // también como texto indexable
   const txt = pairs.map(x=>`PREGUNTA: ${x.q}\nRESPUESTA: ${x.a}${x.src?`\nFUENTE: ${x.src}`:""}`).join("\n\n");
   const sid = nowId();
   state.sources.push({id:sid, type:'file', title:'dataset_chatbot (wizard).jsonl', addedAt:Date.now()});
@@ -571,7 +560,7 @@ function addPairsToProject(pairs){
   msg(`Se agregaron ${pairs.length} pares al proyecto.`);
 }
 
-/** Lee JSONL desde el textarea de vista previa, con validación */
+/** Lee JSONL desde la vista previa (validado) */
 function readPairsFromPreview(){
   const raw = ($("w_preview")?.value||"").trim();
   if (!raw) return [];
@@ -600,7 +589,7 @@ function bindWizardEvents(){
   const btnFromProfile = $("wizFromProfile");
   const previewArea = $("w_preview");
 
-  if (!openBtn || !modal) return; // por si el HTML no tiene el wizard
+  if (!openBtn || !modal) return;
 
   openBtn.addEventListener("click", ()=> modal.classList.add("show"));
   closeBtn?.addEventListener("click", ()=> modal.classList.remove("show"));
@@ -632,12 +621,11 @@ function bindWizardEvents(){
     msg(`Generado desde Objetivo/Notas: ${pairs.length} pares.`);
   });
 
-  // Cierra el modal al hacer click fuera de la caja
+  // Cierra modal al pulsar fuera
   modal.addEventListener("click", (e)=>{
     if (e.target === modal) modal.classList.remove("show");
   });
 }
-
 
 /* ===================== UI render ===================== */
 function renderBasics(){
@@ -760,18 +748,20 @@ function bindEvents(){
     $("miniTitle").textContent = state.bot.name || "Asistente";
     save();
   });
-  $("botGoal").addEventListener("input", e=>{
-    state.bot.goal = e.target.value; save();
-  });
+  $("botGoal").addEventListener("input", e=>{ state.bot.goal = e.target.value; save(); });
   $("botNotes").addEventListener("input", e=>{ state.bot.notes = e.target.value; save(); });
   $("systemPrompt").addEventListener("input", e=>{ state.bot.system = e.target.value; save(); });
 
-  // al entrenar, el meta-doc se re-indexa
-  $("btnTrain").addEventListener("click", ()=>{ buildIndex(); save(); $("modelStatus").textContent = "Con conocimiento"; alert("Entrenamiento (índice) completado."); });
-
+  // Entrenar / parámetros
+  $("btnTrain").addEventListener("click", ()=>{
+    buildIndex(); save();
+    $("modelStatus").textContent = "Con conocimiento";
+    alert("Entrenamiento (índice) completado.");
+  });
   $("topk").addEventListener("change", e=>{ state.bot.topk = Number(e.target.value)||5; save(); });
   $("threshold").addEventListener("change", e=>{ state.bot.threshold = Number(e.target.value)||0.15; save(); });
 
+  // Archivos
   $("btnIngestFiles").addEventListener("click", async ()=>{
     const files = $("filePicker").files;
     if (!files || !files.length) return alert("Selecciona archivos primero.");
@@ -785,6 +775,7 @@ function bindEvents(){
     }
   });
 
+  // URLs
   $("btnAddUrl").addEventListener("click", ()=>{
     const url = $("urlInput").value.trim();
     if (!url) return;
@@ -800,13 +791,17 @@ function bindEvents(){
   });
   $("btnClearSources").addEventListener("click", ()=>{ state.urlsQueue = []; save(); renderUrlQueue(); });
 
+  // Buscar en corpus
   $("btnSearchCorpus").addEventListener("click", ()=>{
     const q = $("searchCorpus").value.trim();
     if (!q) return;
     const hits = searchChunks(q, state.bot.topk, state.bot.threshold);
     const list = $("corpusList");
     list.innerHTML = "";
-    if (!hits.length){ list.appendChild(el("div",{class:"muted small", text:"Sin coincidencias."})); return; }
+    if (!hits.length){
+      list.appendChild(el("div",{class:"muted small", text:"Sin coincidencias."}));
+      return;
+    }
     hits.forEach(h=>{
       const row = el("div",{class:"item"},[
         el("div",{class:"badge"}),
@@ -820,7 +815,12 @@ function bindEvents(){
     });
   });
 
-  $("btnRebuild").addEventListener("click", ()=>{ state.docs.forEach(d=> d.chunks=[]); buildIndex(); save(); alert("Reconstruido el índice."); });
+  // Reconstruir / Reset
+  $("btnRebuild").addEventListener("click", ()=>{
+    state.docs.forEach(d=> d.chunks=[]);
+    buildIndex(); save();
+    alert("Reconstruido el índice.");
+  });
   $("btnReset").addEventListener("click", ()=>{
     if (!confirm("Esto borrará todo el conocimiento y configuración guardada. ¿Continuar?")) return;
     state.sources = []; state.docs = []; state.index = {vocab:new Map(), idf:new Map(), built:false};
@@ -830,45 +830,30 @@ function bindEvents(){
     save(); renderSources(); renderCorpus(); renderUrlQueue(); renderChat(); renderMiniChat();
     $("modelStatus").textContent = "Sin entrenar";
   });
-    // Wizard JSONL
-  bindWizardEvents();   // ← añade esta línea
-}
 
+  // Toggles opcionales
   if ($("allowWeb")) $("allowWeb").addEventListener("change", e=>{ state.settings.allowWeb = !!e.target.checked; save(); });
   if ($("strictContext")) $("strictContext").addEventListener("change", e=>{ state.settings.strictContext = !!e.target.checked; save(); });
 
-  // Exportador HTML
+  // Exportar HTML
   if ($("btnExportHtml")) $("btnExportHtml").addEventListener("click", exportStandaloneHtml);
 
+  // Chat tester
+  if ($("send")) $("send").addEventListener("click", ()=> handleAsk("ask","tester"));
+  if ($("ask")) $("ask").addEventListener("keydown", (e)=>{
+    if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); handleAsk("ask","tester"); }
+  });
+
+  // Mini widget
+  if ($("launcher")) $("launcher").addEventListener("click", ()=>{ $("mini").classList.add("show"); });
+  if ($("closeMini")) $("closeMini").addEventListener("click", ()=>{ $("mini").classList.remove("show"); });
+  if ($("miniSend")) $("miniSend").addEventListener("click", ()=> handleAsk("miniAsk","mini"));
+  if ($("miniAsk")) $("miniAsk").addEventListener("keydown", (e)=>{
+    if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); handleAsk("miniAsk","mini"); }
+  });
+
   // Wizard JSONL
-  $("btnDatasetWizard").addEventListener("click", ()=>{ $("datasetModal").classList.add("show"); });
-  $("wizClose").addEventListener("click", ()=>{ $("datasetModal").classList.remove("show"); });
-  $("wizPreview").addEventListener("click", ()=>{
-    const pairs = pairsFromWizard();
-    $("w_preview").value = jsonlString(pairs);
-  });
-  $("wizDownload").addEventListener("click", ()=>{
-    const pairs = $("w_preview").value.trim() ? $("w_preview").value.trim().split(/\n/).map(l=>JSON.parse(l)) : pairsFromWizard();
-    downloadJsonl(pairs, "dataset_chatbot.jsonl");
-  });
-  $("wizAdd").addEventListener("click", ()=>{
-    const pairs = $("w_preview").value.trim() ? $("w_preview").value.trim().split(/\n/).map(l=>JSON.parse(l)) : pairsFromWizard();
-    addPairsToProject(pairs);
-    alert("Dataset agregado al proyecto.");
-  });
-  $("wizFromProfile").addEventListener("click", ()=>{
-    const pairs = pairsFromProfile();
-    $("w_preview").value = jsonlString(pairs);
-  });
-
-  // Chat tester + mini
-  $("send").addEventListener("click", ()=> handleAsk("ask","tester"));
-  $("ask").addEventListener("keydown", (e)=>{ if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); handleAsk("ask","tester"); } });
-
-  $("launcher").addEventListener("click", ()=>{ $("mini").classList.add("show"); });
-  $("closeMini").addEventListener("click", ()=>{ $("mini").classList.remove("show"); });
-  $("miniSend").addEventListener("click", ()=> handleAsk("miniAsk","mini"));
-  $("miniAsk").addEventListener("keydown", (e)=>{ if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); handleAsk("miniAsk","mini"); } });
+  bindWizardEvents();
 }
 
 /* ===================== Chat ===================== */
