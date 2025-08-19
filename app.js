@@ -960,3 +960,4 @@ function handleAsk(inputId, scope){
   bindEvents();
   if (state.docs.length && !state.index.built) buildIndex();
 })();
+
