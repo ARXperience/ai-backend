@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Studio Chatbot v2 — Entrenamiento por archivos y web</title>
+  <style>
+    :root{
+      --bg:#0f1221;--panel:#141935;--muted:#8b93b2;--text:#e7eaff;--brand:#6c8cff;--accent:#22d3ee;--ok:#22c55e;--warn:#f59e0b;
+      --br:16px;--gap:14px;--shadow:0 10px 30px rgba(0,0,0,.35);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:radial-gradient(1000px 500px at 10% -10%,rgba(108,140,255,.15),transparent),radial-gradient(800px 400px at 90% -10%,rgba(34,211,238,.08),transparent),var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica Neue,Noto Sans,Arial}
+    .app{display:grid;grid-template-columns:360px 1fr;gap:var(--gap);height:100%;padding:var(--gap)}
+    aside{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));border:1px solid rgba(255,255,255,.06);border-radius:var(--br);padding:18px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0}
+    main{display:grid;grid-template-rows:auto 1fr;gap:var(--gap)}
+    header{display:flex;gap:10px;align-items:center;background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));border:1px solid rgba(255,255,255,.06);border-radius:var(--br);padding:16px 18px;box-shadow:var(--shadow)}
+    .logo{width:36px;height:36px;border-radius:10px;background:conic-gradient(from 200deg at 60% 40%,var(--brand),var(--accent));box-shadow:0 0 0 2px rgba(255,255,255,.05) inset}
+    .title{font-weight:700}
+    .section{margin-top:12px}
+    .muted{color:var(--muted)}
+    .small{font-size:12px}
+    .pill{padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04)}
+    textarea,input[type="text"],input[type="number"],.input,select{width:100%;border:1px solid rgba(255,255,255,.08);background:rgba(5,8,18,.6);color:var(--text);border-radius:12px;padding:10px 12px;outline:none}
+    textarea{min-height:90px;resize:vertical}
+    button{background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.02));color:var(--text);border:1px solid rgba(255,255,255,.12);padding:9px 12px;border-radius:12px;cursor:pointer}
+    button.primary{background:linear-gradient(180deg,rgba(108,140,255,.25),rgba(108,140,255,.06));border-color:rgba(108,140,255,.5)}
+    button.ok{background:linear-gradient(180deg,rgba(34,197,94,.25),rgba(34,197,94,.06));border-color:rgba(34,197,94,.5)}
+    button.warn{background:linear-gradient(180deg,rgba(245,158,11,.25),rgba(245,158,11,.06));border-color:rgba(245,158,11,.5)}
+    button.ghost{background:transparent;border-color:rgba(255,255,255,.08)}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    .row{display:flex;gap:10px;align-items:center}
+    .row.spread{justify-content:space-between}
+    .panels{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap);height:100%}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));border:1px solid rgba(255,255,255,.06);border-radius:var(--br);padding:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0}
+    .card h3{margin:0 0 8px 0;font-size:16px}
+    .card .sub{color:var(--muted);font-size:12px;margin-bottom:12px}
+    .list{display:flex;flex-direction:column;gap:10px;overflow:auto}
+    .item{display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:center;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);padding:10px;border-radius:12px}
+    .badge{width:28px;height:28px;border-radius:8px;background:linear-gradient(180deg,rgba(108,140,255,.35),rgba(108,140,255,.1))}
+    .chat{background:radial-gradient(300px 200px at 80% -20%,rgba(108,140,255,.16),transparent),rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.06);border-radius:var(--br);display:flex;flex-direction:column;min-height:0}
+    .chatlog{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
+    .bubble{max-width:80%;padding:10px 12px;border-radius:14px}
+    .user{align-self:flex-end;background:rgba(108,140,255,.18);border:1px solid rgba(108,140,255,.45)}
+    .bot{align-self:flex-start;background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.45)}
+    .composer{display:flex;gap:10px;padding:10px;border-top:1px solid rgba(255,255,255,.06)}
+    .progress{height:8px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+    .progress > div{height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--accent));transition:width .3s ease}
+    .launcher{position:fixed;right:16px;bottom:16px;width:56px;height:56px;border-radius:50%;background:linear-gradient(180deg,var(--brand),#516dff);color:#fff;display:grid;place-items:center;box-shadow:var(--shadow);cursor:pointer;z-index:9999}
+    .mini{position:fixed;right:16px;bottom:86px;width:360px;max-width:92vw;height:520px;display:none;grid-template-rows:auto 1fr auto;background:var(--panel);border:1px solid rgba(255,255,255,.08);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;z-index:9999}
+    .mini header{border:0;border-bottom:1px solid rgba(255,255,255,.08);border-radius:0}
+    .mini .chatlog{background:rgba(0,0,0,.2)}
+    .mini.show{display:grid}
+    @media (max-width:1100px){.app{grid-template-columns:1fr}.panels{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside>
+      <div class="row" style="gap:12px;align-items:center">
+        <div class="logo"></div>
+        <div>
+          <div class="title">Studio Chatbot v2</div>
+          <div class="muted small">Nombra tu bot, define objetivo y entrena con archivos o web</div>
+        </div>
+      </div>
+
+      <div class="section"><div class="pill">Estado: <strong id="modelStatus">Sin entrenar</strong></div></div>
+      <div class="section"><div class="small muted">Nombre del bot</div><input id="botName" type="text" placeholder="Ej: Asistente Comercial" /></div>
+      <div class="section"><div class="small muted">Objetivo del bot</div><textarea id="botGoal" placeholder="Ej: Responder preguntas frecuentes y agendar demos"></textarea></div>
+      <div class="section"><div class="small muted">Información adicional</div><textarea id="botNotes" placeholder="Estilo de tono, límites, políticas, etc."></textarea></div>
+      <div class="section"><div class="small muted">Instrucción del sistema (no se mostrará)</div><textarea id="systemPrompt" placeholder="Reglas internas del bot. No se pegan en la respuesta."></textarea><div class="small muted">⚠️ No se incluirá en la respuesta</div></div>
+
+      <div class="section">
+        <div class="small muted">Entrenamiento por archivos</div>
+        <input id="filePicker" type="file" multiple accept=".pdf,.doc,.docx,.txt,.md,.csv,.json,.jsonl,.html,.htm,.rtf" />
+        <div class="row"><button id="btnIngestFiles" class="primary">Subir y entrenar</button><label class="row small muted"><input type="checkbox" id="autoTrain" checked /> Auto-entrenar</label></div>
+        <div class="small muted">Fuentes cargadas</div><div class="list" id="sourcesList"></div>
+        <div class="progress"><div id="ingestProgress"></div></div>
+      </div>
+
+      <div class="section">
+        <div class="small muted">Entrenamiento por URL</div>
+        <div class="row"><input id="urlInput" type="text" placeholder="https://tu-sitio.com/guia" /><button id="btnAddUrl">Añadir</button></div>
+        <div class="row"><button id="btnCrawl" class="primary">Rastrear y entrenar</button><button id="btnClearSources" class="ghost">Limpiar</button></div>
+        <div class="small muted">URLs en cola</div><div class="list" id="urlList"></div>
+      </div>
+
+      <div class="section grid2">
+        <div><div class="small muted">Top-K</div><input type="number" id="topk" value="5" /></div>
+        <div><div class="small muted">Umbral</div><input type="number" id="threshold" value="0.15" step="0.01" /></div>
+      </div>
+
+      <div class="section grid3">
+        <button id="btnTrain" class="primary">Entrenar</button>
+        <button id="btnRebuild" class="ghost">Reconstruir</button>
+        <button id="btnReset" class="warn">Reiniciar</button>
+      </div>
+
+      <div class="section">
+        <div class="small muted">IA opcional (backend propio)</div>
+        <div class="row small muted"><label><input type="checkbox" id="allowWeb" checked /> Permitir apoyo web</label><label><input type="checkbox" id="strictContext" checked /> Contexto estricto</label></div>
+      </div>
+
+      <div class="section">
+        <button id="btnExportHtml" class="ok">Exportar HTML (estático)</button>
+        <div class="small muted">Descarga un archivo único con el chat y todo el conocimiento incrustado.</div>
+      </div>
+
+      <div class="section"><div class="small muted">Snippet para widget</div>
+        <details><summary>Ver código</summary><pre class="small muted" id="embedSnippet"></pre></details>
+      </div>
+    </aside>
+
+    <main>
+      <header class="row spread">
+        <div class="row" style="gap:10px"><div class="logo" style="width:28px;height:28px"></div>
+          <div><div class="title" id="botNameDisplay">(sin nombre)</div><div class="small muted" id="botGoalDisplay"></div></div>
+        </div>
+        <div class="small pill">Modo: RAG local • Responder siempre</div>
+      </header>
+
+      <div class="panels">
+        <section class="card">
+          <h3>Conocimiento cargado</h3>
+          <div class="row"><input id="searchCorpus" class="input" type="text" placeholder="Buscar..." /><button id="btnSearchCorpus">Buscar</button></div>
+          <div class="list" id="corpusList"></div>
+        </section>
+
+        <section class="card">
+          <h3>Probador de chat</h3>
+          <div class="chat" id="tester">
+            <div class="chatlog" id="chatlog"></div>
+            <div class="composer"><input id="ask" class="input" type="text" placeholder="Escribe..." /><button id="send" class="primary">Enviar</button></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="launcher" id="launcher" title="Abrir chat">💬</div>
+  <div class="mini" id="mini">
+    <header class="row spread">
+      <div class="row" style="gap:8px"><div class="logo" style="width:24px;height:24px"></div><strong id="miniTitle">Asistente</strong></div>
+      <button class="ghost" id="closeMini">Cerrar</button>
+    </header>
+    <div class="chatlog" id="miniLog"></div>
+    <div class="composer"><input id="miniAsk" class="input" type="text" placeholder="Pregunta aquí..." /><button id="miniSend" class="primary">Enviar</button></div>
+  </div>
+
+  <!-- Si quieres leer PDF locales, añade pdfjs-dist y expón window.pdfjsLib -->
+  <script src="app.js"></script>
+</body>
+</html>
