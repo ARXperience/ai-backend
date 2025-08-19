@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Studio Chatbot v2 – Entrenamiento por archivos y web</title>
+  <title>Studio Chatbot v2 – Generador de Bots</title>
   <style>
     :root{
       --bg:#0f1221;--panel:#141935;--muted:#8b93b2;--text:#e7eaff;--brand:#6c8cff;--accent:#22d3ee;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444;
@@ -13,8 +13,8 @@
     html,body{height:100%}
     body{margin:0;background:radial-gradient(1000px 500px at 10% -10%,rgba(108,140,255,.15),transparent),radial-gradient(800px 400px at 90% -10%,rgba(34,211,238,.08),transparent),var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica Neue,Noto Sans,Arial}
     .app{display:grid;grid-template-columns:360px 1fr;gap:var(--gap);height:100%;padding:var(--gap)}
-    aside{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));border:1px solid rgba(255,255,255,.06);border-radius:var(--br);padding:18px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0}
-    main{display:grid;grid-template-rows:auto 1fr;gap:var(--gap)}
+    aside{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));border:1px solid rgba(255,255,255,.06);border-radius:var(--br);padding:18px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0;overflow:auto}
+    main{display:grid;grid-template-rows:auto 1fr auto;gap:var(--gap)}
     header{display:flex;gap:10px;align-items:center;background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));border:1px solid rgba(255,255,255,.06);border-radius:var(--br);padding:16px 18px;box-shadow:var(--shadow)}
     .logo{width:36px;height:36px;border-radius:10px;background:conic-gradient(from 200deg at 60% 40%,var(--brand),var(--accent));box-shadow:0 0 0 2px rgba(255,255,255,.05) inset}
     .title{font-weight:700}
@@ -54,46 +54,48 @@
     .mini .chatlog{background:rgba(0,0,0,.2)}
     .mini.show{display:grid}
     @media (max-width:1100px){.app{grid-template-columns:1fr}.panels{grid-template-columns:1fr}}
-
-    /* Wizard JSONL (modal) */
-    .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;place-items:center;z-index:10000}
-    .modal.show{display:grid}
-    .modal .box{
-      width:min(860px,92vw);max-height:85vh;overflow:auto;
-      background:var(--panel);border:1px solid rgba(255,255,255,.08);
-      border-radius:16px;box-shadow:var(--shadow);padding:16px;
-      display:flex;flex-direction:column;gap:12px
-    }
-    .modal header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
-    .modal textarea{min-height:80px}
   </style>
-
-  <!-- Opcional: lector PDF para ingesta local -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.7.76/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
   <div class="app">
+    <!-- ===================== ASIDE ===================== -->
     <aside>
       <div class="row" style="gap:12px;align-items:center">
         <div class="logo"></div>
         <div>
           <div class="title">Studio Chatbot v2</div>
-          <div class="muted small">Nombra tu bot, define objetivo y entrena con archivos o web</div>
+          <div class="muted small">Genera bots para cualquier empresa (archivos/URL + JSONL)</div>
         </div>
       </div>
 
       <div class="section"><div class="pill">Estado: <strong id="modelStatus">Sin entrenar</strong></div></div>
 
-      <div class="section"><div class="small muted">Nombre del bot</div><input id="botName" type="text" placeholder="Ej: Asistente de Ventas" /></div>
-      <div class="section"><div class="small muted">Objetivo del bot</div><textarea id="botGoal" placeholder="Ej: Atender leads, responder FAQs y derivar a ventas."></textarea></div>
-      <div class="section"><div class="small muted">Información adicional</div><textarea id="botNotes" placeholder="Ej: Tono cercano; pedir nombre y correo; ofrecer demo…"></textarea></div>
-      <div class="section"><div class="small muted">Instrucción del sistema (no se mostrará)</div><textarea id="systemPrompt" placeholder="Reglas internas del asistente."></textarea><div class="small muted">⚠️ No se incluirá en la respuesta</div></div>
+      <div class="section">
+        <div class="small muted">Nombre del bot</div>
+        <input id="botName" type="text" placeholder="Ej: Asistente de Mi Marca" />
+      </div>
+
+      <div class="section">
+        <div class="small muted">Objetivo del bot</div>
+        <textarea id="botGoal" placeholder="¿Qué debe lograr el bot?"></textarea>
+      </div>
+
+      <div class="section">
+        <div class="small muted">Información adicional</div>
+        <textarea id="botNotes" placeholder="Tono, límites, guías de redacción…"></textarea>
+      </div>
+
+      <div class="section">
+        <div class="small muted">Instrucción del sistema (no se mostrará)</div>
+        <textarea id="systemPrompt" placeholder="Instrucciones internas"></textarea>
+        <div class="small muted">⚠️ No se incluirá en la respuesta</div>
+      </div>
 
       <div class="section">
         <div class="small muted">Entrenamiento por archivos</div>
         <input id="filePicker" type="file" multiple accept=".pdf,.doc,.docx,.txt,.md,.csv,.json,.jsonl,.html,.htm,.rtf" />
         <div class="row">
-          <button id="btnIngestFiles" class="primary">Subir y entrenar</button>
+          <button id="btnIngestFiles" class="primary">Subir e indexar</button>
           <label class="row small muted"><input type="checkbox" id="autoTrain" checked /> Auto-entrenar</label>
         </div>
         <div class="small muted">Fuentes cargadas</div>
@@ -103,14 +105,20 @@
 
       <div class="section">
         <div class="small muted">Entrenamiento por URL</div>
-        <div class="row"><input id="urlInput" type="text" placeholder="https://sitio.com/guia" /><button id="btnAddUrl">Añadir</button></div>
-        <div class="row"><button id="btnCrawl" class="primary">Rastrear y entrenar</button><button id="btnClearSources" class="ghost">Limpiar</button></div>
-        <div class="small muted">URLs en cola</div><div class="list" id="urlList"></div>
+        <div class="row"><input id="urlInput" type="text" placeholder="https://tu-sitio.com/guia" /><button id="btnAddUrl">Añadir</button></div>
+        <div class="row"><button id="btnCrawl" class="primary">Rastrear e indexar</button><button id="btnClearSources" class="ghost">Limpiar</button></div>
+        <div class="small muted">URLs en cola</div>
+        <div class="list" id="urlList"></div>
       </div>
 
       <div class="section grid2">
         <div><div class="small muted">Top-K</div><input type="number" id="topk" value="5" /></div>
         <div><div class="small muted">Umbral</div><input type="number" id="threshold" value="0.15" step="0.01" /></div>
+      </div>
+
+      <div class="section">
+        <label class="row small"><input type="checkbox" id="allowWeb" checked /> Permitir apoyo web (si hay URLs)</label>
+        <label class="row small"><input type="checkbox" id="strictContext" checked /> Restringir IA al contexto</label>
       </div>
 
       <div class="section grid3">
@@ -119,24 +127,17 @@
         <button id="btnReset" class="warn">Reiniciar</button>
       </div>
 
-      <!-- Controles extra -->
-      <div class="section grid2">
-        <button id="btnDatasetWizard" class="primary">Asistente de dataset (JSONL)</button>
-        <button id="btnExportHtml" class="ghost">Exportar HTML estático</button>
+      <div class="section">
+        <button id="btnExportHtml" class="ok" style="width:100%">Exportar HTML estático</button>
       </div>
 
       <div class="section">
-        <div class="small muted">Preferencias</div>
-        <label class="row small muted"><input type="checkbox" id="allowWeb" checked /> Permitir usar web (si hay backend IA)</label>
-        <label class="row small muted"><input type="checkbox" id="strictContext" checked /> Responder con contexto estricto</label>
-      </div>
-
-      <div class="section">
-        <div class="small muted">Snippet para widget</div>
+        <div class="small muted">Snippet para incrustar</div>
         <details><summary>Ver código</summary><pre class="small muted" id="embedSnippet"></pre></details>
       </div>
     </aside>
 
+    <!-- ===================== MAIN ===================== -->
     <main>
       <header class="row spread">
         <div class="row" style="gap:10px">
@@ -146,7 +147,7 @@
             <div class="small muted" id="botGoalDisplay"></div>
           </div>
         </div>
-        <div class="small pill">Modo: RAG local • Responder siempre</div>
+        <div class="small pill">Modo: RAG local • Híbrido+BM25</div>
       </header>
 
       <div class="panels">
@@ -164,89 +165,88 @@
           </div>
         </section>
       </div>
+
+      <!-- ========== WIZARD JSONL ========== -->
+      <section class="card" style="margin-top:14px">
+        <h3>Wizard JSONL (preguntas y respuestas entrenables)</h3>
+        <div class="sub">Autocompleta desde una URL, edita los campos y genera un dataset JSONL limpio.</div>
+
+        <div class="section">
+          <div class="small muted">URL para autocompletar</div>
+          <div class="row">
+            <input id="wizardUrlInput" type="text" placeholder="https://ejemplo.com" />
+            <button id="btnAutoFillFromUrl">Autocompletar</button>
+          </div>
+        </div>
+
+        <div class="grid2 section">
+          <div>
+            <div class="small muted">Nombre (opcional)</div>
+            <input id="w_name" type="text" placeholder="Nombre de la empresa/marca" />
+          </div>
+          <div>
+            <div class="small muted">Tono</div>
+            <input id="w_tone" type="text" placeholder="Cercano y profesional" value="Cercano y profesional." />
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="small muted">Descripción / ¿Qué hacen?</div>
+          <textarea id="w_desc" placeholder="Resumen claro y en una o dos frases…"></textarea>
+        </div>
+
+        <div class="section">
+          <div class="small muted">Contacto (email, teléfono, WhatsApp, dirección)</div>
+          <textarea id="w_contact" placeholder="Email(s): ... • Teléfono(s): ... • WhatsApp: ... • Dirección: ..."></textarea>
+        </div>
+
+        <div class="grid2 section">
+          <div>
+            <div class="small muted">Horarios (1 por línea)</div>
+            <textarea id="w_hours" placeholder="Lunes a Viernes 9:00–18:00&#10;Sábados 9:00–13:00"></textarea>
+          </div>
+          <div>
+            <div class="small muted">Ofertas/Precios (1 por línea)</div>
+            <textarea id="w_offers" placeholder="Web desde $..., Plan Pro ..., etc."></textarea>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="small muted">Políticas (1 por línea)</div>
+          <textarea id="w_policies" placeholder="Garantía..., Cambios y devoluciones..., Términos y condiciones..."></textarea>
+        </div>
+
+        <div class="section">
+          <div class="small muted">FAQs (formato: Pregunta | Respuesta)</div>
+          <textarea id="w_faqs" placeholder="¿Cómo comprar? | Haz clic en 'Tienda' y sigue los pasos&#10;¿Medios de pago? | Tarjeta, transferencia, ..."></textarea>
+        </div>
+
+        <div class="section">
+          <div class="row">
+            <button id="btnPreviewJSONL" class="primary">Previsualizar JSONL</button>
+            <button id="btnDownloadJSONL" class="ghost">Descargar JSONL</button>
+            <button id="btnAddJSONLToProject" class="ok">Agregar al proyecto</button>
+          </div>
+          <div class="small muted" style="margin-top:8px">Previsualización</div>
+          <textarea id="jsonlPreview" class="small" style="min-height:140px" placeholder='{"q":"...","a":"...","src":"...","tags":["..."]}'></textarea>
+        </div>
+      </section>
     </main>
   </div>
 
+  <!-- Mini widget -->
   <div class="launcher" id="launcher" title="Abrir chat">💬</div>
   <div class="mini" id="mini">
-    <header class="row spread"><div class="row" style="gap:8px"><div class="logo" style="width:24px;height:24px"></div><strong id="miniTitle">Asistente</strong></div><button class="ghost" id="closeMini">Cerrar</button></header>
+    <header class="row spread">
+      <div class="row" style="gap:8px"><div class="logo" style="width:24px;height:24px"></div><strong id="miniTitle">Asistente</strong></div>
+      <button class="ghost" id="closeMini">Cerrar</button>
+    </header>
     <div class="chatlog" id="miniLog"></div>
     <div class="composer"><input id="miniAsk" class="input" type="text" placeholder="Pregunta aquí..." /><button id="miniSend" class="primary">Enviar</button></div>
   </div>
 
-  <!-- Modal Wizard JSONL -->
-  <div id="datasetModal" class="modal">
-    <div class="box">
-      <header>
-        <strong>Asistente de dataset (JSONL)</strong>
-        <button id="wizClose" class="ghost">Cerrar</button>
-      </header>
-
-      <!-- Autocompletar desde URL -->
-      <div class="section">
-        <div class="small muted">Autocompletar desde URL</div>
-        <div class="row">
-          <input id="w_url" type="text" placeholder="https://tu-sitio.com" />
-          <button id="wizAutofill">Autocompletar</button>
-        </div>
-        <div class="small muted">Se extrae texto de la página (CORS-safe) y se rellenan los campos. Revisa y corrige si hace falta.</div>
-      </div>
-
-      <div class="grid2">
-        <div>
-          <div class="small muted">Nombre de la empresa</div>
-          <input id="w_name" type="text" placeholder="Ej: Acme" />
-        </div>
-        <div>
-          <div class="small muted">Tono</div>
-          <input id="w_tone" type="text" placeholder="Cercano y profesional" />
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="small muted">Descripción breve</div>
-        <textarea id="w_desc" placeholder="¿Qué hace? Público, diferencial…"></textarea>
-      </div>
-
-      <div class="grid2">
-        <div>
-          <div class="small muted">Contacto</div>
-          <textarea id="w_contact" placeholder="Teléfono, WhatsApp, email, dirección…"></textarea>
-        </div>
-        <div>
-          <div class="small muted">Horarios / cobertura</div>
-          <textarea id="w_hours" placeholder="Horarios, ciudades, tiempos…"></textarea>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="small muted">Oferta (una por línea)</div>
-        <textarea id="w_offers" placeholder="Producto/servicio — precio/aplican TyC…"></textarea>
-      </div>
-
-      <div class="section">
-        <div class="small muted">Políticas</div>
-        <textarea id="w_policies" placeholder="Garantía, cambios, devoluciones, tiempos…"></textarea>
-      </div>
-
-      <div class="section">
-        <div class="small muted">FAQs (formato: Pregunta | Respuesta)</div>
-        <textarea id="w_faqs" placeholder="¿Cómo compro?|Agrega al carrito…"></textarea>
-      </div>
-
-      <div class="section">
-        <div class="small muted">Vista previa (JSONL)</div>
-        <textarea id="w_preview" class="small" style="min-height:140px" placeholder='Aquí se genera el JSONL listo para descargar o agregar.'></textarea>
-      </div>
-
-      <div class="row" style="gap:8px;justify-content:flex-end">
-        <button id="wizFromProfile" class="ghost">Desde objetivo/notas</button>
-        <button id="wizPreview">Generar vista previa</button>
-        <button id="wizDownload" class="ok">Descargar JSONL</button>
-        <button id="wizAdd" class="primary">Agregar al proyecto</button>
-      </div>
-    </div>
-  </div>
+  <!-- (Opcional) PDF.js si deseas leer PDFs locales -->
+  <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js"></script> -->
 
   <!-- Tu lógica -->
   <script src="app.js"></script>
