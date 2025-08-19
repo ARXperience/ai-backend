@@ -1,8 +1,10 @@
-/* app.js – Studio Chatbot v2 (ANÁLISIS + SEMÁNTICA + BM25 RERANK)
-   - Índice: TF-IDF, DF, longitudes, BM25
-   - Búsqueda: híbrida (coseno+jaccard) + re-ranqueo BM25 (normalizado)
-   - Análisis de contenido → KB (contacto, horarios, precios, políticas, productos, servicios, ubicaciones, FAQ)
-   - Wizard JSONL + Autocompletar por URL + Export estático
+/* app.js – Studio Chatbot v2
+   ► Índice híbrido (TF-IDF + Jaccard) + re-ranqueo BM25
+   ► Expansión de consulta (sinónimos + tolerancia a typos)
+   ► Análisis semántico → KB (contacto, horarios, precios, políticas, etc.)
+   ► Respuestas claras (saludo + bullets + CTA)
+   ► Wizard JSONL: autocompletar por URL, pares canónicos, export/ingesta
+   ► Export HTML estático “offline”
 */
 
 /* ===== Backend IA opcional (déjalo vacío si no usas) ===== */
@@ -117,6 +119,7 @@ function chunkText(text, chunkSize=1200, overlap=120){
 
 /* ===================== Índice TF-IDF + BM25 ===================== */
 function upsertMetaDoc(){
+  // Re-crear doc con perfil del bot (goal/notes/system)
   state.docs = state.docs.filter(d=> !d.meta);
   state.sources = state.sources.filter(s=> s.type!=='meta');
   const pieces = [];
@@ -135,7 +138,7 @@ function buildIndex(){
   const allChunks = [];
   let totalLen = 0;
 
-  // Construye chunks + tf + vec
+  // Construir chunks + tf + vec
   state.docs.forEach(doc=>{
     if (!doc.chunks?.length) {
       const cks = chunkText(doc.text);
@@ -149,7 +152,7 @@ function buildIndex(){
       const tf = new Map();
       toks.forEach(t=> tf.set(t,(tf.get(t)||0)+1));
       ch.tf = tf;
-      // df: contar 1 por término en este chunk
+      // df (1 por término en el chunk)
       const seen = new Set();
       toks.forEach(t=>{ if(!seen.has(t)){ vocabDF.set(t,(vocabDF.get(t)||0)+1); seen.add(t);} });
       allChunks.push(ch);
@@ -159,7 +162,7 @@ function buildIndex(){
   const N = allChunks.length || 1;
   const avgdl = totalLen / N;
 
-  // IDF TF-IDF (clásico) y IDF BM25
+  // IDF TF-IDF y IDF BM25
   const idf = new Map();
   const idfBM25 = new Map();
   for (const [term, df] of vocabDF){
@@ -167,7 +170,7 @@ function buildIndex(){
     idfBM25.set(term, Math.log( ( (N - df + 0.5) / (df + 0.5) ) + 1 ));
   }
 
-  // Vector TF-IDF
+  // Vector TF-IDF por chunk
   allChunks.forEach(ch=>{
     const vec = new Map();
     for (const [t,f] of ch.tf){
@@ -191,7 +194,7 @@ function buildIndex(){
   save();
 }
 
-/* ===================== Expansión & similitudes ===================== */
+/* ===================== Expansión, similitudes, BM25 ===================== */
 const SYN = {
   precio:["costo","tarifa","valor","vale","cuanto","cotizacion","presupuesto","precios","costos","tarifas"],
   horario:["hora","apertura","atencion","cierre","dias","sabado","domingo"],
@@ -266,22 +269,19 @@ function jaccardSet(aSet, bSet){
   return union? inter/union : 0;
 }
 
-/* ===================== BM25 ===================== */
+/* ===================== BM25 y búsqueda híbrida ===================== */
 const BM25 = { k1:1.2, b:0.75, wHybrid:0.55, wBM25:0.45 };
 function bm25Score(queryTerms, ch){
   const avgdl = state.index.avgdl || 1;
   let score = 0;
   for (const t of queryTerms){
-    const df = state.index.vocab.get(t) || 0;
-    const idf = state.index.idfBM25.get(t) || 0; // log((N-df+0.5)/(df+0.5)+1)
+    const idf = state.index.idfBM25.get(t) || 0;
     const tf = ch.tf.get(t) || 0;
     const denom = tf + BM25.k1 * (1 - BM25.b + BM25.b * (ch.len / avgdl));
     if (denom>0) score += idf * ( (tf * (BM25.k1 + 1)) / denom );
   }
   return score;
 }
-
-/* ===================== Búsqueda híbrida + rerank BM25 ===================== */
 function hybridScore(q, ch){
   const qv = vectorizeQuery(q);
   const cos = cosineSim(qv, ch.vector); // [0..1]
@@ -375,7 +375,7 @@ async function fetchUrlText(url){
 async function ingestFiles(files){
   if (!files?.length) return;
   setBusy(true);
-  const bar = $("ingestProgress"); bar.style.width="0%";
+  const bar = $("ingestProgress"); if (bar) bar.style.width="0%";
   let done = 0;
 
   for (const f of files){
@@ -398,20 +398,20 @@ async function ingestFiles(files){
         state.sources.push({id:sid, type:'file', title:f.name, addedAt:Date.now()});
         state.docs.push({id:nowId(), sourceId:sid, title:f.name, text:txt, chunks:[]});
       }
-      done++; bar.style.width = `${Math.round(done/files.length*100)}%`; continue;
+      done++; if (bar) bar.style.width = `${Math.round(done/files.length*100)}%`; continue;
     }
 
     const text = await readFileAsText(f);
-    if (!text) { done++; bar.style.width = `${Math.round(done/files.length*100)}%`; continue; }
+    if (!text) { done++; if (bar) bar.style.width = `${Math.round(done/files.length*100)}%`; continue; }
 
     const sourceId = nowId();
     state.sources.push({id:sourceId, type:'file', title:f.name, addedAt:Date.now()});
     state.docs.push({id:nowId(), sourceId:sourceId, title:f.name, text, chunks:[]});
-    done++; bar.style.width = `${Math.round(done/files.length*100)}%`;
+    done++; if (bar) bar.style.width = `${Math.round(done/files.length*100)}%`;
   }
 
   buildIndex(); save(); renderSources(); setBusy(false);
-  $("modelStatus").textContent = "Con conocimiento";
+  const ms = $("modelStatus"); if (ms) ms.textContent = "Con conocimiento";
 }
 async function ingestUrls(urls){
   if (!urls?.length) return;
@@ -424,7 +424,7 @@ async function ingestUrls(urls){
     state.docs.push({id:nowId(), sourceId:sid, title:u.title||u.url, text: text||"", chunks:[]});
   }
   buildIndex(); save(); renderSources(); setBusy(false);
-  $("modelStatus").textContent = "Con conocimiento";
+  const ms = $("modelStatus"); if (ms) ms.textContent = "Con conocimiento";
 }
 
 /* ===================== Análisis semántico → KB ===================== */
@@ -457,7 +457,7 @@ function runSemanticAnalysis(){
       .slice(0,20).forEach(s=>pushFact(state.kb.prices, s));
 
     // Políticas
-    lines.filter(l=>/(pol[ií]tica|t[eé]rminos|condiciones|garant[ií]a|devoluci[oó]n|cambios|privacidad|reembolso)/i.test(l))
+    lines.filter(l=>/(pol[ií]tica|t[eé]rminos|condiciones|garant[ií]a|devoluci[oó]n|reembolso)/i.test(l))
       .slice(0,20).forEach(s=>pushFact(state.kb.policies, s));
 
     // Productos/Servicios/Ubicaciones
@@ -518,69 +518,87 @@ async function askServerAI(q, scope, draft){
   }catch(e){ console.warn("AI server error:", e); return null; }
 }
 
-/* ===================== Composición de respuesta ===================== */
+/* ===================== Respuestas claras (saludo + bullets + CTA) ===================== */
+const STYLE = { maxBullets: 3, followup: true, cta: "¿Te paso con un asesor o prefieres que te detalle el siguiente paso aquí?" };
+
+function shortenSentences(text, max=STYLE.maxBullets) {
+  const out = [];
+  const seen = new Set();
+  text.split(/(?<=[\.\!\?])\s+/).forEach(s=>{
+    const t = s.replace(/\s+/g," ").trim();
+    if (t.length < 25) return;
+    const key = t.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(t);
+  });
+  return out.slice(0, max);
+}
+function blockFromKB(theme){
+  const KB = state.kb;
+  if (theme==="contact" && KB.contact.length) return shortenSentences(KB.contact.join(". "));
+  if (theme==="hours"   && KB.hours.length)   return shortenSentences(KB.hours.join(". "));
+  if (theme==="prices"  && (KB.prices.length||KB.products.length)) {
+    const lines = (KB.products.slice(0,2).concat(KB.prices)).join(". ");
+    return shortenSentences(lines);
+  }
+  if (theme==="policies" && KB.policies.length) return shortenSentences(KB.policies.join(". "));
+  if ((theme==="general"||theme==="support") && KB.faqs.length) {
+    const lines = KB.faqs.slice(0,3).map(f=>`${f.q.replace(/\?+$/,"")}: ${f.a}`);
+    return shortenSentences(lines.join(". "));
+  }
+  return [];
+}
+function blockFromHits(hits){
+  const lines = [];
+  const seen = new Set();
+  hits.forEach(h=>{
+    h.chunk.text.split(/(?<=[\.\!\?])\s+/).forEach(s=>{
+      const t = s.replace(/\s+/g," ").trim();
+      if (t.length<30) return;
+      const key = t.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      lines.push(t);
+    });
+  });
+  return shortenSentences(lines.join(" "));
+}
 function detectTheme(q){
-  const s = stripAcc(q.toLowerCase());
+  const s = (q||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
   if (/(precio|costo|tarifa|cuanto|cotiza|presupuesto|plan|paquete)/.test(s)) return "prices";
   if (/(horario|atencion|abre|cierra|dias|agenda|cita)/.test(s)) return "hours";
   if (/(contacto|whats|telefono|correo|email|direccion|ubicacion|sede)/.test(s)) return "contact";
   if (/(politica|garantia|devolucion|reembolso|termino|condicion|privacidad|tyc)/.test(s)) return "policies";
   if (/(producto|servicio|portafolio|catalogo|oferta)/.test(s)) return "products";
   if (/(soporte|ayuda|ticket|incidencia|pqrs|reclamo)/.test(s)) return "support";
-  if (/(envio|entrega|despacho|domicilio|tracking|seguimiento)/.test(s)) return "shipping";
   return "general";
 }
-function composeFromKB(theme){
-  const KB = state.kb;
-  const blocks = [];
-  if (theme==="contact" && KB.contact.length) blocks.push("Contacto:\n- " + KB.contact.slice(0,3).join("\n- "));
-  if (theme==="hours" && KB.hours.length) blocks.push("Horarios/Cobertura:\n- " + KB.hours.slice(0,5).join("\n- "));
-  if ((theme==="prices"||theme==="products") && (KB.prices.length || KB.products.length)){
-    if (KB.products.length) blocks.push("Productos/Servicios:\n- " + KB.products.slice(0,6).join("\n- "));
-    if (KB.prices.length)  blocks.push("Precios/Planes:\n- " + KB.prices.slice(0,6).join("\n- "));
-  }
-  if (theme==="policies" && KB.policies.length) blocks.push("Políticas / TyC:\n- " + KB.policies.slice(0,6).join("\n- "));
-  if (KB.faqs.length && (theme==="general"||theme==="support"))
-    blocks.push("FAQ relacionada:\n- " + KB.faqs.slice(0,3).map(f=>`${f.q} → ${f.a}`).join("\n- "));
-  return blocks.join("\n\n");
-}
-function composeFromHits(q, hits){
-  if (!hits.length) return "";
-  const sentences = [];
-  const seen = new Set();
-  for (const h of hits){
-    h.chunk.text.split(/(?<=[\.\!\?])\s+/).forEach(s=>{
-      const t = s.trim(); if (t.length<40) return;
-      const key = t.toLowerCase(); if (seen.has(key)) return; seen.add(key);
-      sentences.push({t, sc:h.sFinal, doc:h.doc.title});
-    });
-  }
-  sentences.sort((a,b)=> b.sc - a.sc);
-  const picked = sentences.slice(0,6);
-  const bullets = picked.map(x=>`• ${x.t}`).join("\n");
-  const src = Array.from(new Set(picked.map(x=>x.doc))).slice(0,3);
-  return `${bullets}${src.length?`\n\nFuentes: ${src.join(" • ")}`:""}`;
-}
-function composeAnswer(q, hits){
+function composeCrispAnswer(q, hits){
   const theme = detectTheme(q);
-  const kbBlock = composeFromKB(theme);
-  const hitsBlock = composeFromHits(q, hits);
-  if (kbBlock && hitsBlock) return `${kbBlock}\n\n${hitsBlock}`;
-  if (kbBlock) return kbBlock;
-  if (hitsBlock) return hitsBlock;
-  const kp = Array.from(state.kb.keyphrases.entries()).sort((a,b)=> b[1]-a[1]).slice(0,10).map(x=>x[0]);
-  const support = state.kb.sentences.slice(0,5).map(s=>`• ${s.text}`).join("\n");
-  return `Puntos relacionados: ${kp.join(", ")}.\n\n${support}`;
+  // preferimos KB y complementamos con evidencias
+  let bullets = blockFromKB(theme);
+  if (bullets.length < STYLE.maxBullets) {
+    const more = blockFromHits(hits).filter(x=> !bullets.includes(x)).slice(0, STYLE.maxBullets - bullets.length);
+    bullets = bullets.concat(more);
+  }
+  if (!bullets.length) bullets = ["Puedo ayudarte con productos/servicios, precios, horarios, contacto y soporte usando la información cargada."];
+
+  const title = (state.bot.name ? `¡Hola! Soy el asistente de ${state.bot.name}.` : `¡Hola!`);
+  const body  = "• " + bullets.join("\n• ");
+  const cta   = STYLE.cta;
+
+  return `${title}\n\n${body}\n\n${STYLE.followup ? cta : ""}`.trim();
 }
 
-/* ===================== Export HTML estático ===================== */
+/* ===================== Export HTML estático (offline) ===================== */
 function exportStandaloneHtml(){
   const payload = {
     meta: { exportedAt: new Date().toISOString(), app: "Studio Chatbot v2" },
     bot: state.bot, qa: state.qa,
     docs: state.docs.map(d => ({ title: d.title, text: d.text }))
   };
-  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${(state.bot.name||"Asistente")} — Chat</title><style>:root{--bg:#0f1221;--text:#e7eaff;--brand:#6c8cff;--accent:#22d3ee}*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:radial-gradient(1000px 500px at 10% -10%,rgba(108,140,255,.15),transparent),radial-gradient(800px 400px at 90% -10%,rgba(34,211,238,.08),transparent),var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica Neue,Noto Sans,Arial}.wrap{max-width:900px;margin:0 auto;padding:20px}.card{border:1px solid rgba(255,255,255,.08);border-radius:16px;background:rgba(255,255,255,.04);padding:16px}.header{display:flex;gap:10px;align-items:center;margin-bottom:12px}.logo{width:28px;height:28px;border-radius:8px;background:conic-gradient(from 200deg at 60% 40%,var(--brand),var(--accent))}.title{font-weight:700}.chatlog{min-height:60vh;display:flex;flex-direction:column;gap:8px;overflow:auto;padding:6px}.bubble{max-width:80%;padding:10px 12px;border-radius:14px}.user{align-self:flex-end;background:rgba(108,140,255,.18);border:1px solid rgba(108,140,255,.45)}.bot{align-self:flex-start;background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.45)}.composer{display:flex;gap:10px;margin-top:10px}.composer input{flex:1;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(5,8,18,.6);color:var(--text)}.composer button{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(180deg,rgba(108,140,255,.25),rgba(108,140,255,.06));color:var(--text)}</style></head><body><div class="wrap"><div class="card"><div class="header"><div class="logo"></div><div><div class="title">${(state.bot.name||"Asistente")}</div><div style="opacity:.7">${state.bot.goal||""}</div></div></div><div id="log" class="chatlog"></div><div class="composer"><input id="ask" placeholder="Escribe..."/><button id="send">Enviar</button></div><div style="opacity:.7;margin-top:6px">Modo: RAG local (offline) • Híbrido+BM25</div></div></div><script>window.BOOT=${JSON.stringify(payload)};</script><script>(function(){const STOP=new Set("a al algo algunas algunos ante antes como con contra cual cuando de del desde donde dos el ella ellas ellos en entre era erais éramos eran es esa esas ese esos esta estaba estabais estábamos estaban estar este esto estos fue fui fuimos ha han hasta hay la las le les lo los mas más me mientras muy nada ni nos o os otra otros para pero poco por porque que quien se ser si sí sin sobre soy su sus te tiene tengo tuvo tuve u un una unas unos y ya".split(/\\s+/));const strip=s=>s.normalize('NFD').replace(/[\\u0300-\\u036f]/g,"");const stem=w=>strip(w).toLowerCase().replace(/(mente|ciones|cion|idades|idad|osos?|osas?|ando|iendo|ados?|idas?|es|s)$/,'');const tokens=t=>strip(t.toLowerCase()).replace(/[^a-z0-9áéíóúñü\\s]/gi,' ').split(/\\s+/).filter(w=>w&&!STOP.has(w)&&w.length>1);const chunk=(txt,sz=1200,ov=120)=>{const w=txt.split(/\\s+/);const out=[];for(let i=0;i<w.length;i+=Math.max(1,Math.floor(sz-ov))){const part=w.slice(i,i+sz).join(' ').trim();if(part.length>40) out.push(part);}return out};function build(docs){const vocab=new Map();const chs=[];let total=0;docs.forEach(d=>{chunk(d.text).forEach((t,i)=>{const toks=tokens(t).map(stem);const tf=new Map();toks.forEach(x=>tf.set(x,(tf.get(x)||0)+1));const c={id:d.title+"#"+i,text:t,tf,len:toks.length,vec:new Map()};const seen=new Set();toks.forEach(x=>{if(!seen.has(x)){vocab.set(x,(vocab.get(x)||0)+1);seen.add(x);} });chs.push(c);total+=c.len;});});const N=chs.length||1;const avgdl=total/N;const idf=new Map();const idfB=new Map();for(const [term,df] of vocab){idf.set(term,Math.log((N+1)/(df+1))+1);idfB.set(term,Math.log(((N-df+0.5)/(df+0.5))+1));}chs.forEach(c=>{const v=new Map();for(const [t,f] of c.tf){v.set(t,(f/Math.max(1,c.len))*(idf.get(t)||0));}c.vec=v;});return {chs,idf,idfB,N,avgdl};}function cos(a,b){let d=0,na=0,nb=0;a.forEach((va,t)=>{const vb=b.get(t)||0;d+=va*vb;na+=va*va});b.forEach(vb=>nb+=vb*vb);return (na&&nb)?(d/(Math.sqrt(na)*Math.sqrt(nb))):0}const boot=window.BOOT;const IDX=build(boot.docs);const expand=q=>{const ts=tokens(q).map(stem);const out=new Set(ts);ts.forEach(t=>{if(t.endsWith('s')) out.add(t.replace(/s$/,'')); else out.add(t+'s'); out.add(strip(t));});return Array.from(out)};function bm25(qTerms,ch){const k1=1.2,b=0.75;let s=0;for(const t of qTerms){const idf=IDX.idfB.get(t)||0;const tf=ch.tf.get(t)||0;const denom=tf + k1*(1 - b + b*(ch.len/IDX.avgdl)); if(denom>0) s+=idf*((tf*(k1+1))/denom);}return s}function hybrid(q,ch){const ex=expand(q);const tf=new Map();ex.forEach(t=>tf.set(t,(tf.get(t)||0)+1));const v=new Map();const n=Math.max(1,ex.length);ex.forEach(t=>v.set(t,(tf.get(t)/n)*(IDX.idf.get(t)||0.5)));const cosv=cos(v,ch.vec);const setQ=new Set(ex);const setC=new Set(tokens(ch.text).map(stem));let inter=0;setC.forEach(x=>{if(setQ.has(x)) inter++});const jac= (setQ.size+setC.size-inter)? inter/(setQ.size+setC.size-inter):0;return 0.7*cosv+0.3*jac}function search(q,k=6,thr=0.12){const ex=expand(q);const arr=[];let minB=Infinity,maxB=-Infinity;IDX.chs.forEach(c=>{const h=hybrid(q,c);const b=bm25(ex,c);arr.push({c,h,b});if(b<minB)minB=b;if(b>maxB)maxB=b});const range=(maxB-minB)||1;arr.forEach(o=>o.s = 0.55*o.h + 0.45*((o.b-minB)/range));arr.sort((a,b)=>b.s-a.s);const filt=arr.filter(o=>o.s>=thr).slice(0,k);return (filt.length?filt:arr.slice(0,Math.min(k,6))).map(o=>({c:o.c,s:o.s}))}const log=document.getElementById("log");const push=(role,text)=>{const b=document.createElement("div");b.className="bubble "+(role==="user"?"user":"bot");b.textContent=text;log.appendChild(b);log.scrollTop=log.scrollHeight};function compose(q,hits){const sents=[];const seen=new Set();hits.forEach(x=>x.c.text.split(/(?<=[\\.\\!\\?])\\s+/).forEach(y=>{const t=y.trim();if(t.length<40)return;const k=t.toLowerCase();if(seen.has(k))return;seen.add(k);sents.push({t,sc:x.s});}));sents.sort((a,b)=>b.sc-a.sc);const pick=sents.slice(0,6).map(x=>'• '+x.t).join('\\n');return pick || "Resumen:\\n"+IDX.chs.slice(0,5).map(c=>'• '+c.text.slice(0,160)+'…').join('\\n');}function handle(){const i=document.getElementById("ask");const q=i.value.trim();if(!q)return;i.value="";push("user",q);const hits=search(q,6,0.12);push("bot",compose(q,hits));}document.getElementById("send").addEventListener("click",handle);document.getElementById("ask").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handle()}});})();</script></body></html>`;
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${(state.bot.name||"Asistente")} — Chat</title><style>:root{--bg:#0f1221;--text:#e7eaff;--brand:#6c8cff;--accent:#22d3ee}*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:radial-gradient(1000px 500px at 10% -10%,rgba(108,140,255,.15),transparent),radial-gradient(800px 400px at 90% -10%,rgba(34,211,238,.08),transparent),var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica Neue,Noto Sans,Arial}.wrap{max-width:900px;margin:0 auto;padding:20px}.card{border:1px solid rgba(255,255,255,.08);border-radius:16px;background:rgba(255,255,255,.04);padding:16px}.header{display:flex;gap:10px;align-items:center;margin-bottom:12px}.logo{width:28px;height:28px;border-radius:8px;background:conic-gradient(from 200deg at 60% 40%,var(--brand),var(--accent))}.title{font-weight:700}.chatlog{min-height:60vh;display:flex;flex-direction:column;gap:8px;overflow:auto;padding:6px}.bubble{max-width:80%;padding:10px 12px;border-radius:14px}.user{align-self:flex-end;background:rgba(108,140,255,.18);border:1px solid rgba(108,140,255,.45)}.bot{align-self:flex-start;background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.45)}.composer{display:flex;gap:10px;margin-top:10px}.composer input{flex:1;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(5,8,18,.6);color:var(--text)}.composer button{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(180deg,rgba(108,140,255,.25),rgba(108,140,255,.06));color:var(--text)}</style></head><body><div class="wrap"><div class="card"><div class="header"><div class="logo"></div><div><div class="title">${(state.bot.name||"Asistente")}</div><div style="opacity:.7">${state.bot.goal||""}</div></div></div><div id="log" class="chatlog"></div><div class="composer"><input id="ask" placeholder="Escribe..."/><button id="send">Enviar</button></div><div style="opacity:.7;margin-top:6px">Modo: RAG local (offline) • Híbrido+BM25</div></div></div><script>window.BOOT=${JSON.stringify(payload)};</script><script>(function(){const STOP=new Set("a al algo algunas algunos ante antes como con contra cual cuando de del desde donde dos el ella ellas ellos en entre era erais éramos eran es esa esas ese esos esta estaba estabais estábamos estaban estar este esto estos fue fui fuimos ha han hasta hay la las le les lo los mas más me mientras muy nada ni nos o os otra otros para pero poco por porque que quien se ser si sí sin sobre soy su sus te tiene tengo tuvo tuve u un una unas unos y ya".split(/\\s+/));const strip=s=>s.normalize('NFD').replace(/[\\u0300-\\u036f]/g,"");const stem=w=>strip(w).toLowerCase().replace(/(mente|ciones|cion|idades|idad|osos?|osas?|ando|iendo|ados?|idas?|es|s)$/,'');const tokens=t=>strip(t.toLowerCase()).replace(/[^a-z0-9áéíóúñü\\s]/gi,' ').split(/\\s+/).filter(w=>w&&!STOP.has(w)&&w.length>1);const chunk=(txt,sz=1200,ov=120)=>{const w=txt.split(/\\s+/);const out=[];for(let i=0;i<w.length;i+=Math.max(1,Math.floor(sz-ov))){const part=w.slice(i,i+sz).join(' ').trim();if(part.length>40) out.push(part);}return out};function build(docs){const vocab=new Map();const chs=[];let total=0;docs.forEach(d=>{chunk(d.text).forEach((t,i)=>{const toks=tokens(t).map(stem);const tf=new Map();toks.forEach(x=>tf.set(x,(tf.get(x)||0)+1));const c={id:d.title+"#"+i,text:t,tf,len:toks.length,vec:new Map()};const seen=new Set();toks.forEach(x=>{if(!seen.has(x)){vocab.set(x,(vocab.get(x)||0)+1);seen.add(x);} });chs.push(c);total+=c.len;});});const N=chs.length||1;const avgdl=total/N;const idf=new Map();const idfB=new Map();for(const [term,df] of vocab){idf.set(term,Math.log((N+1)/(df+1))+1);idfB.set(term,Math.log(((N-df+0.5)/(df+0.5))+1));}chs.forEach(c=>{const v=new Map();for(const [t,f] of c.tf){v.set(t,(f/Math.max(1,c.len))*(idf.get(t)||0));}c.vec=v;});return {chs,idf,idfB,N,avgdl};}function cos(a,b){let d=0,na=0,nb=0;a.forEach((va,t)=>{const vb=b.get(t)||0;d+=va*vb;na+=va*va});b.forEach(vb=>nb+=vb*vb);return (na&&nb)?(d/(Math.sqrt(na)*Math.sqrt(nb))):0}const boot=window.BOOT;const IDX=build(boot.docs);const expand=q=>{const ts=tokens(q).map(stem);const out=new Set(ts);ts.forEach(t=>{if(t.endsWith('s')) out.add(t.replace(/s$/,'')); else out.add(t+'s'); out.add(strip(t));});return Array.from(out)};function bm25(qTerms,ch){const k1=1.2,b=0.75;let s=0;for(const t of qTerms){const idf=IDX.idfB.get(t)||0;const tf=ch.tf.get(t)||0;const denom=tf + k1*(1 - b + b*(ch.len/IDX.avgdl)); if(denom>0) s+=idf*((tf*(k1+1))/denom);}return s}function hybrid(q,ch){const ex=expand(q);const tf=new Map();ex.forEach(t=>tf.set(t,(tf.get(t)||0)+1));const v=new Map();const n=Math.max(1,ex.length);ex.forEach(t=>v.set(t,(tf.get(t)/n)*(IDX.idf.get(t)||0.5)));const cosv=cos(v,ch.vec);const setQ=new Set(ex);const setC=new Set(tokens(ch.text).map(stem));let inter=0;setC.forEach(x=>{if(setQ.has(x)) inter++});const jac= (setQ.size+setC.size-inter)? inter/(setQ.size+setC.size-inter):0;return 0.7*cosv+0.3*jac}function search(q,k=6,thr=0.12){const ex=expand(q);const arr=[];let minB=Infinity,maxB=-Infinity;IDX.chs.forEach(c=>{const h=hybrid(q,c);const b=bm25(ex,c);arr.push({c,h,b});if(b<minB)minB=b;if(b>maxB)maxB=b});const range=(maxB-minB)||1;arr.forEach(o=>o.s = 0.55*o.h + 0.45*((o.b-minB)/range));arr.sort((a,b)=>b.s-a.s);const filt=arr.filter(o=>o.s>=thr).slice(0,k);return (filt.length?filt:arr.slice(0,Math.min(k,6))).map(o=>({c:o.c,s:o.s}))}const log=document.getElementById("log");const push=(role,text)=>{const b=document.createElement("div");b.className="bubble "+(role==="user"?"user":"bot");b.textContent=text;log.appendChild(b);log.scrollTop=log.scrollHeight};function compose(q,hits){const sents=[];const seen=new Set();hits.forEach(x=>x.c.text.split(/(?<=[\\.\\!\\?])\\s+/).forEach(y=>{const t=y.trim();if(t.length<40)return;const k=t.toLowerCase();if(seen.has(k))return;seen.add(k);sents.push({t,sc:x.s});}));sents.sort((a,b)=>b.sc-a.sc);const pick=sents.slice(0,6).map(x=>'• '+x.t).join('\\n');return pick || "Resumen:\\n"+IDX.chs.slice(0,5).map(c=>'• '+c.text.slice(0,160)+'…').join('\\n');}function handle(){const i=document.getElementById("ask");const q=i.value.trim();if(!q)return;i.value="";push("user",q);const hits=search(q,6,0.12);const bullets=compose(q,hits);const head=${JSON.stringify(state.bot.name?`¡Hola! Soy el asistente de ${state.bot.name}.`:"¡Hola!")};const cta=${JSON.stringify(STYLE.cta)};push("bot", head+"\\n\\n"+bullets+"\\n\\n"+cta);}document.getElementById("send").addEventListener("click",handle);document.getElementById("ask").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handle()}});})();</script></body></html>`;
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -590,35 +608,206 @@ function exportStandaloneHtml(){
   a.remove();
 }
 
-/* ===================== Wizard JSONL + Autocompletar ===================== */
-/* (se mantiene igual que tu versión anterior con autoFillFromUrl, pairsFromWizard, etc.)
-   — si necesitas, te lo reenvío completo; omitido aquí para no duplicar demasiado código. */
+/* ===================== JSONL limpio: extracción y generación ===================== */
+function cleanForAnswer(t){
+  return (t||"")
+    .replace(/\[[^\]]*\]\([^)]+\)/g," ")       // [txt](url)
+    .replace(/!\[[^\]]*\]\([^)]+\)/g," ")      // ![img](url)
+    .replace(/https?:\/\/\S+/g," ")            // URLs
+    .replace(/\b(inicio|home|blog|tienda|contacto)\b/gi," ") // menús genéricos
+    .replace(/\s{2,}/g," ")
+    .trim();
+}
+function topSentences(text, max=5, minLen=40){
+  const out = [];
+  const seen = new Set();
+  cleanForAnswer(text).split(/(?<=[\.\!\?])\s+/).forEach(s=>{
+    const t = s.replace(/\s+/g," ").trim();
+    if (t.length < minLen) return;
+    const key = t.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(t);
+  });
+  return out.slice(0,max);
+}
+function extractFromText(url, text){
+  const lines = cleanForAnswer(text).split(/\n+/).map(s=>s.trim()).filter(Boolean);
+  const emails = Array.from((text||"").matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)).map(m=>m[0]);
+  const phones = Array.from((text||"").matchAll(/(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,3}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}/g))
+    .map(m=>m[0]).filter(x=>x.replace(/\D/g,'').length>=7);
 
-/* ===================== UI render / eventos / chat ===================== */
-/* (idéntico a tu última versión; lo importante del cambio está en buildIndex y searchChunks) */
+  const hours = lines.filter(l=>/(horario|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|\b\d{1,2}:\d{2}\b|\bam\b|\bpm\b)/i.test(l)).slice(0,6);
+  const offers = lines.filter(l=>/(precio|plan|paquete|servicio|producto|\$|USD|COP|MXN)/i.test(l)).slice(0,8);
+  const policies = lines.filter(l=>/(pol[ií]tica|t[eé]rminos|condiciones|garant[ií]a|devoluci[oó]n|reembolso|privacidad)/i.test(l)).slice(0,8);
 
+  const desc = topSentences(text, 4).join(" ");
+
+  const faqs = [];
+  for (let i=0;i<lines.length-1;i++){
+    const q = lines[i], a = lines[i+1];
+    if (/\?/.test(q) && a && !/\?$/.test(a)) {
+      const ans = topSentences(a,2,20).join(" ");
+      if (ans) faqs.push({ q: q.replace(/\s+/g," ").trim(), a: ans });
+    }
+  }
+
+  const contactParts = [];
+  if (emails.length) contactParts.push(`Email(s): ${[...new Set(emails)].join(", ")}`);
+  if (phones.length) contactParts.push(`Teléfono(s): ${[...new Set(phones)].join(", ")}`);
+  const contactLines = lines.filter(l=>/(whats?app|contacto|direcci[oó]n|ubicaci[oó]n|soporte|correo|email|tel[eé]fono|celular)/i.test(l)).slice(0,4);
+  const contact = [ ...contactParts, ...contactLines ].join(" • ");
+
+  let name=""; try { const host = new URL(url).hostname.replace(/^www\./,''); name = host.split('.')[0]; } catch {}
+  name = name ? (name.charAt(0).toUpperCase()+name.slice(1)) : "";
+
+  return { name, desc, contact, hours, offers, policies, faqs };
+}
+function pairsCanonicalFromBuckets(b){
+  const asBullets = (arr)=> arr.slice(0,5).map((x,i)=> `${i+1}. ${x}`).join("\n");
+  const pairs = [];
+
+  if (b.desc) {
+    pairs.push({ q: "¿Qué hacen? | ¿Qué es esta empresa? | ¿A qué se dedican?", a: b.desc, tags:["about"], src:"perfil" });
+  }
+  if (b.offers?.length){
+    pairs.push({ q: "¿Qué productos o servicios ofrecen? | ¿Cuáles son los planes y precios?", a: asBullets(b.offers), tags:["oferta","precios"], src:"oferta" });
+  }
+  if (b.contact){
+    pairs.push({ q: "¿Cómo los contacto? | ¿Tienen WhatsApp o teléfono? | ¿Cuál es el correo?", a: b.contact, tags:["contacto"], src:"contacto" });
+  }
+  if (b.hours?.length){
+    pairs.push({ q: "¿Cuáles son los horarios de atención? | ¿Abren fines de semana?", a: asBullets(b.hours), tags:["horarios"], src:"operación" });
+  }
+  if (b.policies?.length){
+    pairs.push({ q: "¿Tienen políticas de garantía, cambios o devoluciones?", a: asBullets(b.policies), tags:["políticas"], src:"políticas" });
+  }
+  (b.faqs||[]).slice(0,6).forEach(f=>{
+    if (f.q && f.a) pairs.push({ q: f.q, a: f.a, tags:["faq"], src:"faq" });
+  });
+  pairs.push({
+    q: "hola | buenas | hey | hello | hi",
+    a: `¡Hola! Soy el asistente virtual${state.bot.name?` de ${state.bot.name}`:""}. Puedo ayudarte con: productos/servicios, precios, horarios, contacto y soporte. ¿Qué necesitas?`,
+    tags:["saludo"], src:"sistema"
+  });
+
+  return pairs;
+}
+function pairsFromWizard(){
+  const name = ($("w_name")?.value||"").trim();
+  const tone = ($("w_tone")?.value||"").trim() || "Cercano y profesional.";
+  const desc = ($("w_desc")?.value||"").trim();
+  const contact = ($("w_contact")?.value||"").trim();
+  const hours = ($("w_hours")?.value||"").trim().split(/\r?\n/).filter(Boolean);
+  const offers = ($("w_offers")?.value||"").trim().split(/\r?\n/).filter(Boolean);
+  const policies = ($("w_policies")?.value||"").trim().split(/\r?\n/).filter(Boolean);
+
+  const faqs = [];
+  ($("w_faqs")?.value||"").trim().split(/\r?\n/).forEach(line=>{
+    const parts = line.split(/\s*\|\s*/);
+    if (parts.length>=2) {
+      const q = (parts[0]||"").trim();
+      const a = (parts.slice(1).join(" | ")||"").trim();
+      if (q && a) faqs.push({ q: /[\?\¿]$/.test(q)? q : (q+"?"), a });
+    }
+  });
+
+  const buckets = { desc, contact, hours, offers, policies, faqs };
+  const pairs = pairsCanonicalFromBuckets(buckets);
+
+  if (name || desc) {
+    pairs.unshift({ q: `¿Quiénes son ${name||"ustedes"}?`, a: `${desc}\n\nTono: ${tone}`, tags:["about"], src:"perfil" });
+  }
+  return pairs;
+}
+async function autoFillFromUrl(){
+  const elUrl = $("wizardUrlInput"); if (!elUrl) return;
+  const url = elUrl.value.trim(); if (!url) return alert("Pega una URL primero.");
+  const txt = await fetchUrlText(url);
+  if (!txt) return alert("No pude leer esa URL (CORS). Prueba otra o usa un proxy.");
+
+  const b = extractFromText(url, txt);
+
+  if ($("w_name"))    $("w_name").value = b.name || $("w_name").value;
+  if ($("w_desc"))    $("w_desc").value = b.desc || $("w_desc").value;
+  if ($("w_contact")) $("w_contact").value = b.contact || $("w_contact").value;
+  if ($("w_hours"))   $("w_hours").value = (b.hours||[]).join("\n");
+  if ($("w_offers"))  $("w_offers").value = (b.offers||[]).join("\n");
+  if ($("w_policies"))$("w_policies").value = (b.policies||[]).join("\n");
+
+  const faqLines = (b.faqs||[]).map(f=> `${f.q} | ${f.a}`).join("\n");
+  if ($("w_faqs")) $("w_faqs").value = faqLines;
+
+  alert("Campos autocompletados. Revisa y edita antes de generar el JSONL.");
+}
+function pairsToJSONL(pairs){
+  return pairs.map(p=> JSON.stringify({
+    q: p.q, a: p.a, src: p.src||undefined, tags: p.tags||undefined
+  })).join("\n");
+}
+function previewJSONL(){
+  const pairs = pairsFromWizard();
+  const out = pairsToJSONL(pairs);
+  if ($("jsonlPreview")) $("jsonlPreview").value = out;
+}
+function downloadJSONL(){
+  const text = $("jsonlPreview")?.value || pairsToJSONL(pairsFromWizard());
+  const blob = new Blob([text], { type:"application/jsonl;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (state.bot.name ? state.bot.name.toLowerCase().replace(/\s+/g,"-") : "dataset") + ".jsonl";
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1500);
+  a.remove();
+}
+function addJSONLToProject(){
+  const text = $("jsonlPreview")?.value?.trim(); if (!text) return alert("No hay contenido JSONL.");
+  const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const qaPairs = [];
+  for (const line of lines){
+    try{
+      const obj = JSON.parse(line);
+      if (obj && obj.q && obj.a) qaPairs.push({ q:String(obj.q), a:String(obj.a), src: obj.src?String(obj.src):undefined });
+    }catch{}
+  }
+  if (!qaPairs.length) return alert("No encontré pares válidos {q,a} en el JSONL.");
+  state.qa.push(...qaPairs);
+  const txt = qaPairs.map(x=>`PREGUNTA: ${x.q}\nRESPUESTA: ${x.a}${x.src?`\nFUENTE: ${x.src}`:""}`).join("\n\n");
+  const sid = nowId();
+  state.sources.push({id:sid, type:'file', title:'dataset.jsonl', addedAt:Date.now()});
+  state.docs.push({id:nowId(), sourceId:sid, title:'dataset.jsonl', text:txt, chunks:[]});
+  buildIndex(); save(); renderSources();
+  alert("Dataset agregado e indexado.");
+}
+
+/* ===================== UI: render ===================== */
 function renderBasics(){
-  $("botName").value = state.bot.name||"";
-  $("botGoal").value = state.bot.goal||"";
-  $("botNotes").value = state.bot.notes||"";
-  $("systemPrompt").value = state.bot.system||"";
-  $("topk").value = state.bot.topk;
-  $("threshold").value = state.bot.threshold;
-  $("botNameDisplay").textContent = state.bot.name || "(sin nombre)";
-  $("botGoalDisplay").textContent = state.bot.goal || "";
-  $("miniTitle").textContent = state.bot.name || "Asistente";
-  $("modelStatus").textContent = state.docs.length ? "Con conocimiento" : "Sin entrenar";
+  $("botName") && ( $("botName").value = state.bot.name||"" );
+  $("botGoal") && ( $("botGoal").value = state.bot.goal||"" );
+  $("botNotes") && ( $("botNotes").value = state.bot.notes||"" );
+  $("systemPrompt") && ( $("systemPrompt").value = state.bot.system||"" );
+  $("topk") && ( $("topk").value = state.bot.topk );
+  $("threshold") && ( $("threshold").value = state.bot.threshold );
+  $("botNameDisplay") && ( $("botNameDisplay").textContent = state.bot.name || "(sin nombre)" );
+  $("botGoalDisplay") && ( $("botGoalDisplay").textContent = state.bot.goal || "" );
+  $("miniTitle") && ( $("miniTitle").textContent = state.bot.name || "Asistente" );
+  $("modelStatus") && ( $("modelStatus").textContent = state.docs.length ? "Con conocimiento" : "Sin entrenar" );
+
   const snippet =
 `<!-- Widget mínimo -->
 <link rel="stylesheet" href="(tus estilos)">
 <div class="launcher" id="launcher">💬</div>
 <div class="mini" id="mini"> ... </div>
 <script src="app.js"></script>`;
-  $("embedSnippet").textContent = snippet;
+  $("embedSnippet") && ( $("embedSnippet").textContent = snippet );
 }
 function renderSources(){
-  const list = $("sourcesList"); list.innerHTML="";
-  if (!state.sources.length){ list.appendChild(el("div",{class:"muted small", text:"Aún no has cargado fuentes."})); return; }
+  const list = $("sourcesList"); if (!list) return;
+  list.innerHTML="";
+  if (!state.sources.length){
+    list.appendChild(el("div",{class:"muted small", text:"Aún no has cargado fuentes."}));
+    return;
+  }
   const items = state.sources.slice().sort((a,b)=> b.addedAt-a.addedAt);
   items.forEach(s=>{
     const badge = el("div",{class:"badge"});
@@ -632,8 +821,12 @@ function renderSources(){
   });
 }
 function renderCorpus(){
-  const list = $("corpusList"); list.innerHTML="";
-  if (!state.docs.length){ list.appendChild(el("div",{class:"muted small", text:"Sin documentos. Sube archivos o añade URLs."})); return; }
+  const list = $("corpusList"); if (!list) return;
+  list.innerHTML="";
+  if (!state.docs.length){
+    list.appendChild(el("div",{class:"muted small", text:"Sin documentos. Sube archivos o añade URLs."}));
+    return;
+  }
   state.docs.forEach(d=>{
     const lines = d.text.split(/\n/).slice(0,3).join(" ").slice(0,140);
     const row = el("div",{class:"item"},[
@@ -648,8 +841,12 @@ function renderCorpus(){
   });
 }
 function renderUrlQueue(){
-  const list = $("urlList"); list.innerHTML="";
-  if (!state.urlsQueue.length){ list.appendChild(el("div",{class:"muted small", text:"No hay URLs en cola."})); return; }
+  const list = $("urlList"); if (!list) return;
+  list.innerHTML="";
+  if (!state.urlsQueue.length){
+    list.appendChild(el("div",{class:"muted small", text:"No hay URLs en cola."}));
+    return;
+  }
   state.urlsQueue.forEach(u=>{
     const row = el("div",{class:"item"},[
       el("div",{class:"badge"}),
@@ -687,18 +884,20 @@ function renderMiniChat(){
 function setBusy(flag){
   ["btnIngestFiles","btnCrawl","btnTrain","btnRebuild","btnReset"].forEach(id=>{ if ($(id)) $(id).disabled = flag; });
 }
+
+/* ===================== Eventos ===================== */
 function bindEvents(){
   $("botName")?.addEventListener("input", e=>{
     state.bot.name = e.target.value;
-    $("botNameDisplay").textContent = state.bot.name || "(sin nombre)";
-    $("miniTitle").textContent = state.bot.name || "Asistente";
+    $("botNameDisplay") && ( $("botNameDisplay").textContent = state.bot.name || "(sin nombre)" );
+    $("miniTitle") && ( $("miniTitle").textContent = state.bot.name || "Asistente" );
     save();
   });
   $("botGoal")?.addEventListener("input", e=>{ state.bot.goal = e.target.value; save(); });
   $("botNotes")?.addEventListener("input", e=>{ state.bot.notes = e.target.value; save(); });
   $("systemPrompt")?.addEventListener("input", e=>{ state.bot.system = e.target.value; save(); });
 
-  $("btnTrain")?.addEventListener("click", ()=>{ buildIndex(); $("modelStatus").textContent="Con conocimiento"; alert("Entrenamiento (índice + BM25 + análisis) listo."); });
+  $("btnTrain")?.addEventListener("click", ()=>{ buildIndex(); $("modelStatus") && ( $("modelStatus").textContent="Con conocimiento"); alert("Entrenamiento (índice + BM25 + análisis) listo."); });
   $("topk")?.addEventListener("change", e=>{ state.bot.topk = Number(e.target.value)||5; save(); });
   $("threshold")?.addEventListener("change", e=>{ state.bot.threshold = Number(e.target.value)||0.15; save(); });
 
@@ -729,7 +928,8 @@ function bindEvents(){
   $("btnSearchCorpus")?.addEventListener("click", ()=>{
     const q = $("searchCorpus").value.trim(); if (!q) return;
     const hits = searchChunks(q, state.bot.topk, state.bot.threshold);
-    const list = $("corpusList"); list.innerHTML="";
+    const list = $("corpusList"); if (!list) return;
+    list.innerHTML="";
     if (!hits.length){ list.appendChild(el("div",{class:"muted small", text:"Sin coincidencias."})); return; }
     hits.forEach(h=>{
       const row = el("div",{class:"item"},[
@@ -753,7 +953,7 @@ function bindEvents(){
     state.settings = { allowWeb:true, strictContext:true };
     $("ingestProgress") && ( $("ingestProgress").style.width="0%" );
     save(); renderSources(); renderCorpus(); renderUrlQueue(); renderChat(); renderMiniChat();
-    $("modelStatus").textContent = "Sin entrenar";
+    $("modelStatus") && ( $("modelStatus").textContent = "Sin entrenar" );
   });
 
   $("allowWeb")?.addEventListener("change", e=>{ state.settings.allowWeb = !!e.target.checked; save(); });
@@ -767,13 +967,33 @@ function bindEvents(){
   $("miniSend")?.addEventListener("click", ()=> handleAsk("miniAsk","mini"));
   $("miniAsk")?.addEventListener("keydown", (e)=>{ if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); handleAsk("miniAsk","mini"); } });
 
-  bindWizardEvents?.();
+  bindWizardEvents();
 }
+
+/* ===================== Wizard JSONL: binds ===================== */
+function bindWizardEvents(){
+  $("btnAutoFillFromUrl")?.addEventListener("click", autoFillFromUrl);
+  $("btnPreviewJSONL")?.addEventListener("click", previewJSONL);
+  $("btnDownloadJSONL")?.addEventListener("click", downloadJSONL);
+  $("btnAddJSONLToProject")?.addEventListener("click", addJSONLToProject);
+}
+
+/* ===================== Chat handling ===================== */
 function pushAndRender(scope, role, text){
   const arr = (scope==="mini") ? state.miniChat : state.chat;
   arr.push({role, text});
   (scope==="mini") ? renderMiniChat() : renderChat();
   save();
+}
+function answerFromQA(query){
+  if (!state.qa.length) return null;
+  const qv = vectorizeQuery(query);
+  let best=null, bestScore=0;
+  for (let i=0;i<state.qa.length;i++){
+    const s = cosineSim(qv, vectorizeQuery(state.qa[i].q));
+    if (s>bestScore){ bestScore=s; best = state.qa[i]; }
+  }
+  return (bestScore>=0.30) ? best : null;
 }
 function handleAsk(inputId, scope){
   const input = $(inputId); if (!input) return;
@@ -781,37 +1001,43 @@ function handleAsk(inputId, scope){
   input.value = "";
 
   const qLower = q.toLowerCase();
+
+  // Saludos → respuesta clara con bullets
+  const greetRE = /^(hola|buenas|hey|hello|hi)\b/i;
+  pushAndRender(scope, 'user', q);
+  if (greetRE.test(qLower)){
+    const hits = searchChunks("presentación empresa servicios contacto precios horarios", state.bot.topk, Math.min(0.12,state.bot.threshold));
+    const msg = composeCrispAnswer(q, hits);
+    pushAndRender(scope,'assistant', msg);
+    return;
+  }
+
+  // Preguntas explícitas sobre IA
   if (/(eres|tú eres|tu eres).*(ia|inteligencia|modelo|chatgpt|gemini)/i.test(qLower)){
     pushAndRender(scope,'assistant', `Soy tu asistente virtual. ¿En qué puedo ayudarte hoy?`);
     return;
   }
 
-  pushAndRender(scope, 'user', q);
-
-  // Q&A programadas
-  let bestQA = null, bestScore = 0;
-  if (state.qa.length){
-    const qv = vectorizeQuery(q);
-    for (let i=0;i<state.qa.length;i++){
-      const s = cosineSim(qv, vectorizeQuery(state.qa[i].q));
-      if (s>bestScore){ bestScore=s; bestQA = state.qa[i]; }
-    }
-  }
-  if (bestQA && bestScore>=0.30){
-    pushAndRender(scope, 'assistant', bestQA.a + (bestQA.src?`\n\nFuente: ${bestQA.src}`:""));
+  // 1) Q&A programadas primero
+  const qa = answerFromQA(q);
+  if (qa){
+    pushAndRender(scope, 'assistant', qa.a + (qa.src ? `\n\nFuente: ${qa.src}` : ""));
     return;
   }
 
-  // Búsqueda híbrida + BM25
+  // 2) RAG híbrido + BM25
   const hits = searchChunks(q, state.bot.topk, state.bot.threshold);
-  let draft = composeAnswer(q, hits);
+  let draft = composeCrispAnswer(q, hits);
 
+  // 3) Opcional: IA backend para pulir
   if (AI_SERVER_URL){
     askServerAI(q, scope, draft).then(ai=>{
       pushAndRender(scope,'assistant', (ai||draft));
     });
     return;
   }
+
+  // 4) Respuesta clara local
   pushAndRender(scope,'assistant', draft);
 }
 
