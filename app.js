@@ -441,75 +441,203 @@ function exportStandaloneHtml() {
   a.remove();
 }
 
-/* ===================== Wizard JSONL ===================== */
+/* ===================== Wizard JSONL (FIXED) ===================== */
+
+/** Utilidad: muestra mensajes cortos */
+function msg(txt){ alert(txt); }
+
+/** Parser robusto para FAQs.
+ * Acepta líneas:
+ *  - "¿Cómo compro?|Añade al carrito..."
+ *  - "Cómo compro? | Añade al carrito..."
+ *  - "Cómo compro | Añade al carrito..."
+ */
+function parseFaqLine(line){
+  const raw = line.trim();
+  if (!raw) return null;
+  // Divide por "|" con o sin espacios
+  const parts = raw.split(/\s*\|\s*/);
+  if (parts.length < 2) return null;
+
+  let q = (parts[0]||"").trim();
+  let a = (parts.slice(1).join(" | ")||"").trim(); // por si la respuesta contiene "|"
+
+  if (!q || !a) return null;
+
+  // Normaliza signos de interrogación (si no tiene "?" final, lo añadimos)
+  const hasQuestion = /[¿?]/.test(q);
+  if (!/[?]$/.test(q)) q = q.replace(/\?+$/,''); // limpia "???" raros
+  if (!/\?$/.test(q)) q = q + (hasQuestion ? "" : "?");
+
+  // Asegura que si empieza sin "¿", no pasa nada; si quieres forzarlo, puedes añadirlo aquí
+  return { q, a, src:"faq" };
+}
+
+/** Toma campos del asistente y genera pares Q&A */
 function pairsFromWizard(){
-  const name = $("w_name").value.trim();
-  const tone = $("w_tone").value.trim()||"cercano y profesional";
-  const desc = $("w_desc").value.trim();
-  const contact = $("w_contact").value.trim();
-  const hours = $("w_hours").value.trim();
-  const offers = $("w_offers").value.trim().split(/\r?\n/).filter(Boolean);
-  const policies = $("w_policies").value.trim();
-  const faqs = $("w_faqs").value.trim().split(/\r?\n/).filter(Boolean);
+  const name = ($("w_name")?.value||"").trim();
+  const tone = ($("w_tone")?.value||"").trim() || "Cercano y profesional.";
+  const desc = ($("w_desc")?.value||"").trim();
+  const contact = ($("w_contact")?.value||"").trim();
+  const hours = ($("w_hours")?.value||"").trim();
+  const offersLines = ($("w_offers")?.value||"").trim().split(/\r?\n/).filter(Boolean);
+  const policies = ($("w_policies")?.value||"").trim();
+  const faqsLines = ($("w_faqs")?.value||"").trim().split(/\r?\n/).filter(Boolean);
 
   /** @type {Array<{q:string,a:string,src?:string}>} */
   const pairs = [];
 
-  if (name || desc) pairs.push({
-    q:`¿Qué es ${name||"la empresa"} y qué hace?`,
-    a:`${desc || "Somos una empresa que ayuda a clientes con productos y servicios específicos."}\n\nTono del asistente: ${tone}.`,
-    src:"perfil"
-  });
+  if (name || desc){
+    pairs.push({
+      q: `¿Qué es ${name || "esta empresa"} y qué hace?`,
+      a: `${desc || "Somos una empresa que ayuda a clientes con productos y servicios específicos."}\n\nTono del asistente: ${tone}`,
+      src: "perfil"
+    });
+  } else {
+    // Sin nombre/desc → al menos un par base para que no quede vacío
+    pairs.push({
+      q: "¿Qué hace esta empresa?",
+      a: "Ayudamos a clientes con sus necesidades principales. Puedo orientarte en precios, procesos y soporte.",
+      src: "perfil"
+    });
+  }
+
   if (contact) pairs.push({ q:"¿Cómo puedo contactarlos?", a:contact, src:"contacto" });
   if (hours)   pairs.push({ q:"¿Cuáles son los horarios y cobertura?", a:hours, src:"operación" });
 
-  if (offers.length){
-    const list = offers.map((l,i)=>`${i+1}. ${l}`).join("\n");
+  if (offersLines.length){
+    const list = offersLines.map((l,i)=>`${i+1}. ${l}`).join("\n");
     pairs.push({ q:"¿Qué productos/servicios ofrecen y precios?", a:list, src:"oferta" });
   }
+
   if (policies) pairs.push({ q:"¿Cuáles son las políticas de garantía, cambios y tiempos?", a:policies, src:"políticas" });
 
-  faqs.forEach(line=>{
-    const m = line.split(/\?\s*\|/); // "¿...?| respuesta"
-    if (m.length===2) pairs.push({ q: m[0].trim()+"?", a: m[1].trim(), src:"faq" });
+  // FAQs: tolerante
+  faqsLines.forEach(line=>{
+    const parsed = parseFaqLine(line);
+    if (parsed) pairs.push(parsed);
   });
+
+  // Si quedó completamente vacío, rellena desde Objetivo/Notas
+  if (!pairs.length){
+    pairs.push(...pairsFromProfile());
+  }
 
   return pairs;
 }
+
+/** Genera pares rápidos a partir de Objetivo/Notas del perfil actual */
 function pairsFromProfile(){
-  const goal = state.bot.goal.trim();
-  const notes = state.bot.notes.trim();
-  const tone = /tono|estilo|cercan|profes/i.test(notes) ? "" : "Tono del asistente: cercano y profesional.";
+  const goal = (state.bot.goal||"").trim();
+  const notes = (state.bot.notes||"").trim();
   /** @type {Array<{q:string,a:string,src?:string}>} */
   const pairs = [];
   if (goal) pairs.push({ q:"¿Cuál es el objetivo de este asistente?", a:goal, src:"perfil" });
   if (notes) pairs.push({ q:"¿Qué debo saber para atender bien al cliente?", a:notes, src:"perfil" });
-  if (tone) pairs.push({ q:"¿Cómo responde el asistente?", a:tone, src:"perfil" });
+  if (!goal && !notes){
+    pairs.push({ q:"¿Cómo respondes?", a:"De forma clara, breve y útil. Pido datos mínimos y doy siguientes pasos concretos.", src:"perfil" });
+  }
   return pairs;
 }
+
+/** Serializa Q&A a JSONL */
 function jsonlString(pairs){
   return pairs.map(p=>JSON.stringify(p)).join("\n");
 }
+
+/** Descarga un archivo .jsonl */
 function downloadJsonl(pairs, name="dataset_chatbot.jsonl"){
+  if (!pairs.length){ msg("No hay pares para descargar."); return; }
   const blob = new Blob([jsonlString(pairs)], {type:"application/jsonl;charset=utf-8"});
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;
   document.body.appendChild(a); a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 1500);
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1200);
   a.remove();
 }
+
+/** Agrega Q&A al proyecto (y re-indexa) */
 function addPairsToProject(pairs){
-  if (!pairs.length) return;
+  if (!pairs.length){ msg("No hay pares para agregar."); return; }
   state.qa.push(...pairs);
-  // También como texto indexable
+  // También lo metemos como texto indexable para el RAG
   const txt = pairs.map(x=>`PREGUNTA: ${x.q}\nRESPUESTA: ${x.a}${x.src?`\nFUENTE: ${x.src}`:""}`).join("\n\n");
   const sid = nowId();
-  state.sources.push({id:sid, type:'file', title:'dataset_chatbot.jsonl (wizard)', addedAt:Date.now()});
-  state.docs.push({id:nowId(), sourceId:sid, title:'dataset_chatbot.jsonl (wizard)', text:txt, chunks:[]});
+  state.sources.push({id:sid, type:'file', title:'dataset_chatbot (wizard).jsonl', addedAt:Date.now()});
+  state.docs.push({id:nowId(), sourceId:sid, title:'dataset_chatbot (wizard).jsonl', text:txt, chunks:[]});
   buildIndex(); save(); renderSources();
   $("modelStatus").textContent = "Con conocimiento";
+  msg(`Se agregaron ${pairs.length} pares al proyecto.`);
 }
+
+/** Lee JSONL desde el textarea de vista previa, con validación */
+function readPairsFromPreview(){
+  const raw = ($("w_preview")?.value||"").trim();
+  if (!raw) return [];
+  const lines = raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const pairs = [];
+  for (let i=0;i<lines.length;i++){
+    try{
+      const obj = JSON.parse(lines[i]);
+      if (obj && obj.q && obj.a){ pairs.push({ q:String(obj.q), a:String(obj.a), src: obj.src?String(obj.src):undefined }); }
+      else { throw new Error("Falta q/a"); }
+    }catch(e){
+      throw new Error(`Línea ${i+1} inválida: ${e.message}`);
+    }
+  }
+  return pairs;
+}
+
+/* ====== Enlaces de UI del Wizard ====== */
+function bindWizardEvents(){
+  const openBtn = $("btnDatasetWizard");
+  const closeBtn = $("wizClose");
+  const modal = $("datasetModal");
+  const btnPreview = $("wizPreview");
+  const btnDownload = $("wizDownload");
+  const btnAdd = $("wizAdd");
+  const btnFromProfile = $("wizFromProfile");
+  const previewArea = $("w_preview");
+
+  if (!openBtn || !modal) return; // por si el HTML no tiene el wizard
+
+  openBtn.addEventListener("click", ()=> modal.classList.add("show"));
+  closeBtn?.addEventListener("click", ()=> modal.classList.remove("show"));
+
+  btnPreview?.addEventListener("click", ()=>{
+    const pairs = pairsFromWizard();
+    previewArea.value = jsonlString(pairs);
+    msg(`Generado: ${pairs.length} pares (vista previa actualizada).`);
+  });
+
+  btnDownload?.addEventListener("click", ()=>{
+    try{
+      const pairs = previewArea.value.trim() ? readPairsFromPreview() : pairsFromWizard();
+      downloadJsonl(pairs, "dataset_chatbot.jsonl");
+    }catch(e){ msg(e.message || "No se pudo descargar."); }
+  });
+
+  btnAdd?.addEventListener("click", ()=>{
+    try{
+      const pairs = previewArea.value.trim() ? readPairsFromPreview() : pairsFromWizard();
+      if (!pairs.length){ msg("No hay pares para agregar."); return; }
+      addPairsToProject(pairs);
+    }catch(e){ msg(e.message || "No se pudo agregar al proyecto."); }
+  });
+
+  btnFromProfile?.addEventListener("click", ()=>{
+    const pairs = pairsFromProfile();
+    previewArea.value = jsonlString(pairs);
+    msg(`Generado desde Objetivo/Notas: ${pairs.length} pares.`);
+  });
+
+  // Cierra el modal al hacer click fuera de la caja
+  modal.addEventListener("click", (e)=>{
+    if (e.target === modal) modal.classList.remove("show");
+  });
+}
+
 
 /* ===================== UI render ===================== */
 function renderBasics(){
@@ -702,6 +830,9 @@ function bindEvents(){
     save(); renderSources(); renderCorpus(); renderUrlQueue(); renderChat(); renderMiniChat();
     $("modelStatus").textContent = "Sin entrenar";
   });
+    // Wizard JSONL
+  bindWizardEvents();   // ← añade esta línea
+}
 
   if ($("allowWeb")) $("allowWeb").addEventListener("change", e=>{ state.settings.allowWeb = !!e.target.checked; save(); });
   if ($("strictContext")) $("strictContext").addEventListener("change", e=>{ state.settings.strictContext = !!e.target.checked; save(); });
