@@ -1,8 +1,8 @@
-/* app.js – Studio Chatbot v2 (GENÉRICO con Wizard JSONL FIXED)
+/* app.js – Studio Chatbot v2 (GENÉRICO con Wizard JSONL + Autocompletar URL)
    - RAG TF-IDF + coseno (archivos/URLs + meta: objetivo/notas/sistema)
    - Q&A via *.jsonl ({q,a,src})
    - Fallback opcional a backend IA (historial + contexto)
-   - Asistente de dataset (JSONL) + Exportar HTML estático
+   - Asistente de dataset (JSONL) + Autorelleno por URL + Exportar HTML estático
 */
 
 /* ======= Config backend IA (opcional). Deja "" si no tienes ======= */
@@ -100,9 +100,8 @@ function chunkText(text, chunkSize=1200, overlap=120){
   return chunks;
 }
 
-/* ======== “Meta-doc”: Objetivo/Notas/Sistema influye la búsqueda ======== */
+/* ======== Meta-doc: Objetivo/Notas/Sistema influye la búsqueda ======== */
 function upsertMetaDoc(){
-  // Elimina meta-doc anterior
   state.docs = state.docs.filter(d=> !d.meta);
   state.sources = state.sources.filter(s=> s.type!=='meta');
 
@@ -120,11 +119,9 @@ function upsertMetaDoc(){
 
 /* ===================== Índice ===================== */
 function buildIndex(){
-  // asegura incluir meta-doc
   upsertMetaDoc();
-
   const vocab = new Map();
-  const all = []; // {id,text,vector,_doc}
+  const all = [];
   state.docs.forEach(doc=>{
     if (!doc.chunks?.length) {
       const cks = chunkText(doc.text);
@@ -161,7 +158,6 @@ function buildIndex(){
     ch.vector = vec;
   });
 
-  // Re-ensambla chunks dentro de cada doc
   state.docs.forEach(doc=>{
     doc.chunks = all.filter(x=> x._doc.id===doc.id)
       .map(x=>({ id:x.id, text:x.text, vector:x.vector }));
@@ -263,9 +259,8 @@ async function readFileAsText(file){
   return "";
 }
 
-// Fetch con anti-CORS: normal → r.jina.ai (readability) → allorigins
+// Fetch con anti-CORS: directo → r.jina.ai → allorigins
 async function fetchUrlText(url){
-  // 1) Intento directo (si el sitio permite CORS)
   try{
     const r = await fetch(url, { mode:'cors' });
     const ct = (r.headers.get('content-type')||"").toLowerCase();
@@ -274,7 +269,6 @@ async function fetchUrlText(url){
     return raw;
   }catch{}
 
-  // 2) Readability extractor público (texto limpio)
   try{
     const cleanURL = url.replace(/^https?:\/\//,'');
     const r = await fetch(`https://r.jina.ai/http://${cleanURL}`);
@@ -282,7 +276,6 @@ async function fetchUrlText(url){
     if (raw && raw.length>50) return normalizeText(raw);
   }catch{}
 
-  // 3) allorigins (proxy simple)
   try{
     const r = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
     const raw = await r.text();
@@ -304,7 +297,6 @@ async function ingestFiles(files){
   for (const f of files){
     const ext = (f.name.split('.').pop()||"").toLowerCase();
 
-    // JSONL Q&A
     if (ext === 'jsonl'){
       const raw = await f.text();
       const lines = raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
@@ -388,7 +380,7 @@ function synthesizeAnswer(query, hits){
   const sentences = [];
   const seen = new Set();
   hits.forEach(h=>{
-    if (h.doc.meta) return; // no citar perfil/objetivo/notas
+    if (h.doc.meta) return;
     h.chunk.text.split(/(?<=[\.\!\?])\s+/).forEach(s=>{
       const t = s.trim();
       if (!t) return;
@@ -419,7 +411,7 @@ function synthesizeAnswer(query, hits){
 function stylizeAnswer(text, system, notes){
   let t = text;
   if (notes && /breve|conciso/i.test(notes) && t.length>600) t = t.slice(0, 600) + "…";
-  if (system) t = t.replaceAll(system, ""); // evita “filtrarlo”
+  if (system) t = t.replaceAll(system, "");
   return t;
 }
 
@@ -441,12 +433,86 @@ function exportStandaloneHtml() {
   a.remove();
 }
 
-/* ===================== Wizard JSONL (FIXED) ===================== */
+/* ===================== Autorelleno desde URL (heurístico) ===================== */
+function fillMerge(curr, add){
+  if (!add) return curr || "";
+  if (!curr) return add;
+  if (curr.includes(add)) return curr;
+  return curr + "\n\n" + add;
+}
+function extractFromText(url, text){
+  const lines = (text||"").split(/\n+/).map(s=>s.trim()).filter(Boolean);
 
-/** Utilidad: mensajes */
+  let name = "";
+  try {
+    const h = new URL(url).hostname.replace(/^www\./,'');
+    const base = h.split('.')[0];
+    name = base ? base.charAt(0).toUpperCase() + base.slice(1) : "";
+  } catch(e){}
+
+  const emails = Array.from((text||"").matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)).map(m=>m[0]);
+  const phones = Array.from((text||"").matchAll(/(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,3}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}/g))
+    .map(m=>m[0]).filter(x=>x.replace(/\D/g,'').length>=7);
+
+  const hourLines = lines.filter(l=>/(horario|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|\b\d{1,2}:\d{2}\b|\bam\b|\bpm\b)/i.test(l)).slice(0,8);
+  const offerLines = lines.filter(l=>/(?:\$|\bUSD\b|\bCOP\b|\bMXN\b|\bS\/\b|\bAR\$)|\bprecio|\bplan|\bservicio|\bpaquete/i.test(l)).slice(0,12);
+  const policyLines = lines.filter(l=>/(pol[ií]tica|t[eé]rminos|condiciones|garant[ií]a|devoluci[oó]n|cambios|privacidad)/i.test(l)).slice(0,12);
+
+  const faqs = [];
+  for (let i=0;i<lines.length;i++){
+    const L = lines[i];
+    if (/\?/.test(L)) {
+      const q = L.replace(/\s+/g," ").trim();
+      const a = (lines[i+1]||"").replace(/\s+/g," ").trim();
+      if (q && a && !/\?$/.test(a)) {
+        faqs.push({ q, a });
+        if (faqs.length>=10) break;
+      }
+    }
+  }
+
+  let desc = "";
+  const aboutIdx = lines.findIndex(l=>/(sobre|qu[ií]enes somos|qu[eé] es|nosotros|acerca)/i.test(l));
+  const pick = aboutIdx>=0 ? lines.slice(aboutIdx, aboutIdx+6) : lines.slice(0,6);
+  desc = pick.join(" ").replace(/\s+/g," ").trim().slice(0,700);
+
+  const contactParts = [];
+  if (emails.length) contactParts.push(`Emails: ${[...new Set(emails)].join(", ")}`);
+  if (phones.length) contactParts.push(`Teléfonos: ${[...new Set(phones)].join(", ")}`);
+  const contactExtras = lines.filter(l=>/(whats?app|contacto|direcci[oó]n|ubicaci[oó]n|atenci[oó]n|soporte)/i.test(l)).slice(0,5);
+  const contact = fillMerge(contactParts.join("\n"), contactExtras.join("\n"));
+
+  return {
+    name,
+    desc,
+    contact,
+    hours: hourLines.join("\n"),
+    offers: offerLines.join("\n"),
+    policies: policyLines.join("\n"),
+    faqs
+  };
+}
+async function autoFillFromUrl(url){
+  if (!url) throw new Error("Pega una URL primero.");
+  const txt = await fetchUrlText(url);
+  if (!txt || txt.length < 40) throw new Error("No pude leer esa URL (CORS, bloqueo o contenido vacío).");
+  const data = extractFromText(url, txt);
+
+  if (data.name && !$("w_name").value) $("w_name").value = data.name;
+  $("w_desc").value     = fillMerge($("w_desc").value, data.desc);
+  $("w_contact").value  = fillMerge($("w_contact").value, data.contact);
+  $("w_hours").value    = fillMerge($("w_hours").value, data.hours);
+  $("w_offers").value   = fillMerge($("w_offers").value, data.offers);
+  $("w_policies").value = fillMerge($("w_policies").value, data.policies);
+
+  if (data.faqs?.length){
+    const lines = data.faqs.map(f => `${f.q} | ${f.a}`);
+    $("w_faqs").value = fillMerge($("w_faqs").value, lines.join("\n"));
+  }
+}
+
+/* ===================== Wizard JSONL ===================== */
 function msg(txt){ alert(txt); }
-
-/** Parser robusto para FAQs: "¿Pregunta?|Respuesta", "Pregunta? | Respuesta", "Pregunta | Respuesta" */
 function parseFaqLine(line){
   const raw = line.trim();
   if (!raw) return null;
@@ -464,8 +530,17 @@ function parseFaqLine(line){
 
   return { q, a, src:"faq" };
 }
-
-/** Genera pares Q&A desde el wizard */
+function pairsFromProfile(){
+  const goal = (state.bot.goal||"").trim();
+  const notes = (state.bot.notes||"").trim();
+  const pairs = [];
+  if (goal) pairs.push({ q:"¿Cuál es el objetivo de este asistente?", a:goal, src:"perfil" });
+  if (notes) pairs.push({ q:"¿Qué debo saber para atender bien al cliente?", a:notes, src:"perfil" });
+  if (!goal && !notes){
+    pairs.push({ q:"¿Cómo respondes?", a:"De forma clara, breve y útil. Pido datos mínimos y doy siguientes pasos concretos.", src:"perfil" });
+  }
+  return pairs;
+}
 function pairsFromWizard(){
   const name = ($("w_name")?.value||"").trim();
   const tone = ($("w_tone")?.value||"").trim() || "Cercano y profesional.";
@@ -476,7 +551,6 @@ function pairsFromWizard(){
   const policies = ($("w_policies")?.value||"").trim();
   const faqsLines = ($("w_faqs")?.value||"").trim().split(/\r?\n/).filter(Boolean);
 
-  /** @type {Array<{q:string,a:string,src?:string}>} */
   const pairs = [];
 
   if (name || desc){
@@ -514,27 +588,7 @@ function pairsFromWizard(){
 
   return pairs;
 }
-
-/** Pares rápidos desde Objetivo/Notas */
-function pairsFromProfile(){
-  const goal = (state.bot.goal||"").trim();
-  const notes = (state.bot.notes||"").trim();
-  /** @type {Array<{q:string,a:string,src?:string}>} */
-  const pairs = [];
-  if (goal) pairs.push({ q:"¿Cuál es el objetivo de este asistente?", a:goal, src:"perfil" });
-  if (notes) pairs.push({ q:"¿Qué debo saber para atender bien al cliente?", a:notes, src:"perfil" });
-  if (!goal && !notes){
-    pairs.push({ q:"¿Cómo respondes?", a:"De forma clara, breve y útil. Pido datos mínimos y doy siguientes pasos concretos.", src:"perfil" });
-  }
-  return pairs;
-}
-
-/** Serializa Q&A a JSONL */
-function jsonlString(pairs){
-  return pairs.map(p=>JSON.stringify(p)).join("\n");
-}
-
-/** Descarga .jsonl */
+function jsonlString(pairs){ return pairs.map(p=>JSON.stringify(p)).join("\n"); }
 function downloadJsonl(pairs, name="dataset_chatbot.jsonl"){
   if (!pairs.length){ msg("No hay pares para descargar."); return; }
   const blob = new Blob([jsonlString(pairs)], {type:"application/jsonl;charset=utf-8"});
@@ -545,12 +599,9 @@ function downloadJsonl(pairs, name="dataset_chatbot.jsonl"){
   setTimeout(()=>URL.revokeObjectURL(a.href), 1200);
   a.remove();
 }
-
-/** Agrega Q&A al proyecto (y re-indexa) */
 function addPairsToProject(pairs){
   if (!pairs.length){ msg("No hay pares para agregar."); return; }
   state.qa.push(...pairs);
-  // también como texto indexable
   const txt = pairs.map(x=>`PREGUNTA: ${x.q}\nRESPUESTA: ${x.a}${x.src?`\nFUENTE: ${x.src}`:""}`).join("\n\n");
   const sid = nowId();
   state.sources.push({id:sid, type:'file', title:'dataset_chatbot (wizard).jsonl', addedAt:Date.now()});
@@ -559,8 +610,6 @@ function addPairsToProject(pairs){
   $("modelStatus").textContent = "Con conocimiento";
   msg(`Se agregaron ${pairs.length} pares al proyecto.`);
 }
-
-/** Lee JSONL desde la vista previa (validado) */
 function readPairsFromPreview(){
   const raw = ($("w_preview")?.value||"").trim();
   if (!raw) return [];
@@ -577,8 +626,6 @@ function readPairsFromPreview(){
   }
   return pairs;
 }
-
-/* ====== Enlaces de UI del Wizard ====== */
 function bindWizardEvents(){
   const openBtn = $("btnDatasetWizard");
   const closeBtn = $("wizClose");
@@ -621,7 +668,23 @@ function bindWizardEvents(){
     msg(`Generado desde Objetivo/Notas: ${pairs.length} pares.`);
   });
 
-  // Cierra modal al pulsar fuera
+  // Autocompletar desde URL
+  const urlInput = $("w_url");
+  const btnAuto = $("wizAutofill");
+  btnAuto?.addEventListener("click", async ()=>{
+    const url = urlInput?.value.trim();
+    if (!url) return msg("Pega una URL válida.");
+    btnAuto.disabled = true; const old = btnAuto.textContent; btnAuto.textContent = "Cargando…";
+    try{
+      await autoFillFromUrl(url);
+      msg("Listo: campos sugeridos desde la URL. Revisa y ajusta lo necesario.");
+    }catch(e){
+      msg(e.message || "No pude autocompletar desde esa URL.");
+    }finally{
+      btnAuto.disabled = false; btnAuto.textContent = old || "Autocompletar";
+    }
+  });
+
   modal.addEventListener("click", (e)=>{
     if (e.target === modal) modal.classList.remove("show");
   });
@@ -752,7 +815,6 @@ function bindEvents(){
   $("botNotes").addEventListener("input", e=>{ state.bot.notes = e.target.value; save(); });
   $("systemPrompt").addEventListener("input", e=>{ state.bot.system = e.target.value; save(); });
 
-  // Entrenar / parámetros
   $("btnTrain").addEventListener("click", ()=>{
     buildIndex(); save();
     $("modelStatus").textContent = "Con conocimiento";
@@ -761,7 +823,6 @@ function bindEvents(){
   $("topk").addEventListener("change", e=>{ state.bot.topk = Number(e.target.value)||5; save(); });
   $("threshold").addEventListener("change", e=>{ state.bot.threshold = Number(e.target.value)||0.15; save(); });
 
-  // Archivos
   $("btnIngestFiles").addEventListener("click", async ()=>{
     const files = $("filePicker").files;
     if (!files || !files.length) return alert("Selecciona archivos primero.");
@@ -775,7 +836,6 @@ function bindEvents(){
     }
   });
 
-  // URLs
   $("btnAddUrl").addEventListener("click", ()=>{
     const url = $("urlInput").value.trim();
     if (!url) return;
@@ -791,7 +851,6 @@ function bindEvents(){
   });
   $("btnClearSources").addEventListener("click", ()=>{ state.urlsQueue = []; save(); renderUrlQueue(); });
 
-  // Buscar en corpus
   $("btnSearchCorpus").addEventListener("click", ()=>{
     const q = $("searchCorpus").value.trim();
     if (!q) return;
@@ -815,7 +874,6 @@ function bindEvents(){
     });
   });
 
-  // Reconstruir / Reset
   $("btnRebuild").addEventListener("click", ()=>{
     state.docs.forEach(d=> d.chunks=[]);
     buildIndex(); save();
@@ -831,20 +889,16 @@ function bindEvents(){
     $("modelStatus").textContent = "Sin entrenar";
   });
 
-  // Toggles opcionales
   if ($("allowWeb")) $("allowWeb").addEventListener("change", e=>{ state.settings.allowWeb = !!e.target.checked; save(); });
   if ($("strictContext")) $("strictContext").addEventListener("change", e=>{ state.settings.strictContext = !!e.target.checked; save(); });
 
-  // Exportar HTML
   if ($("btnExportHtml")) $("btnExportHtml").addEventListener("click", exportStandaloneHtml);
 
-  // Chat tester
   if ($("send")) $("send").addEventListener("click", ()=> handleAsk("ask","tester"));
   if ($("ask")) $("ask").addEventListener("keydown", (e)=>{
     if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); handleAsk("ask","tester"); }
   });
 
-  // Mini widget
   if ($("launcher")) $("launcher").addEventListener("click", ()=>{ $("mini").classList.add("show"); });
   if ($("closeMini")) $("closeMini").addEventListener("click", ()=>{ $("mini").classList.remove("show"); });
   if ($("miniSend")) $("miniSend").addEventListener("click", ()=> handleAsk("miniAsk","mini"));
@@ -852,7 +906,6 @@ function bindEvents(){
     if (e.key==="Enter" && !e.shiftKey) { e.preventDefault(); handleAsk("miniAsk","mini"); }
   });
 
-  // Wizard JSONL
   bindWizardEvents();
 }
 
