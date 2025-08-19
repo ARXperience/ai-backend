@@ -1,14 +1,14 @@
-/* app.js – Studio Chatbot v2
+/* app.js – Studio Chatbot v2 (genérico, sin marcas)
    ► Índice híbrido (TF-IDF + Jaccard) + re-ranqueo BM25
    ► Expansión de consulta (sinónimos + tolerancia a typos)
    ► Análisis semántico → KB (contacto, horarios, precios, políticas, etc.)
    ► Respuestas claras (saludo + bullets + CTA)
-   ► Wizard JSONL: autocompletar por URL, pares canónicos, export/ingesta
+   ► Wizard JSONL: autocompletar por URL, pares canónicos y limpios, export/ingesta
    ► Export HTML estático “offline”
 */
 
 /* ===== Backend IA opcional (déjalo vacío si no usas) ===== */
-const AI_SERVER_URL = ""; // p.ej. "https://api.tu-dominio.com/chat"
+const AI_SERVER_URL = ""; // ej: "https://api.tu-dominio.com/chat"
 
 /* ===================== Estado ===================== */
 const state = {
@@ -598,7 +598,7 @@ function exportStandaloneHtml(){
     bot: state.bot, qa: state.qa,
     docs: state.docs.map(d => ({ title: d.title, text: d.text }))
   };
-  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${(state.bot.name||"Asistente")} — Chat</title><style>:root{--bg:#0f1221;--text:#e7eaff;--brand:#6c8cff;--accent:#22d3ee}*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:radial-gradient(1000px 500px at 10% -10%,rgba(108,140,255,.15),transparent),radial-gradient(800px 400px at 90% -10%,rgba(34,211,238,.08),transparent),var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica Neue,Noto Sans,Arial}.wrap{max-width:900px;margin:0 auto;padding:20px}.card{border:1px solid rgba(255,255,255,.08);border-radius:16px;background:rgba(255,255,255,.04);padding:16px}.header{display:flex;gap:10px;align-items:center;margin-bottom:12px}.logo{width:28px;height:28px;border-radius:8px;background:conic-gradient(from 200deg at 60% 40%,var(--brand),var(--accent))}.title{font-weight:700}.chatlog{min-height:60vh;display:flex;flex-direction:column;gap:8px;overflow:auto;padding:6px}.bubble{max-width:80%;padding:10px 12px;border-radius:14px}.user{align-self:flex-end;background:rgba(108,140,255,.18);border:1px solid rgba(108,140,255,.45)}.bot{align-self:flex-start;background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.45)}.composer{display:flex;gap:10px;margin-top:10px}.composer input{flex:1;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(5,8,18,.6);color:var(--text)}.composer button{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(180deg,rgba(108,140,255,.25),rgba(108,140,255,.06));color:var(--text)}</style></head><body><div class="wrap"><div class="card"><div class="header"><div class="logo"></div><div><div class="title">${(state.bot.name||"Asistente")}</div><div style="opacity:.7">${state.bot.goal||""}</div></div></div><div id="log" class="chatlog"></div><div class="composer"><input id="ask" placeholder="Escribe..."/><button id="send">Enviar</button></div><div style="opacity:.7;margin-top:6px">Modo: RAG local (offline) • Híbrido+BM25</div></div></div><script>window.BOOT=${JSON.stringify(payload)};</script><script>(function(){const STOP=new Set("a al algo algunas algunos ante antes como con contra cual cuando de del desde donde dos el ella ellas ellos en entre era erais éramos eran es esa esas ese esos esta estaba estabais estábamos estaban estar este esto estos fue fui fuimos ha han hasta hay la las le les lo los mas más me mientras muy nada ni nos o os otra otros para pero poco por porque que quien se ser si sí sin sobre soy su sus te tiene tengo tuvo tuve u un una unas unos y ya".split(/\\s+/));const strip=s=>s.normalize('NFD').replace(/[\\u0300-\\u036f]/g,"");const stem=w=>strip(w).toLowerCase().replace(/(mente|ciones|cion|idades|idad|osos?|osas?|ando|iendo|ados?|idas?|es|s)$/,'');const tokens=t=>strip(t.toLowerCase()).replace(/[^a-z0-9áéíóúñü\\s]/gi,' ').split(/\\s+/).filter(w=>w&&!STOP.has(w)&&w.length>1);const chunk=(txt,sz=1200,ov=120)=>{const w=txt.split(/\\s+/);const out=[];for(let i=0;i<w.length;i+=Math.max(1,Math.floor(sz-ov))){const part=w.slice(i,i+sz).join(' ').trim();if(part.length>40) out.push(part);}return out};function build(docs){const vocab=new Map();const chs=[];let total=0;docs.forEach(d=>{chunk(d.text).forEach((t,i)=>{const toks=tokens(t).map(stem);const tf=new Map();toks.forEach(x=>tf.set(x,(tf.get(x)||0)+1));const c={id:d.title+"#"+i,text:t,tf,len:toks.length,vec:new Map()};const seen=new Set();toks.forEach(x=>{if(!seen.has(x)){vocab.set(x,(vocab.get(x)||0)+1);seen.add(x);} });chs.push(c);total+=c.len;});});const N=chs.length||1;const avgdl=total/N;const idf=new Map();const idfB=new Map();for(const [term,df] of vocab){idf.set(term,Math.log((N+1)/(df+1))+1);idfB.set(term,Math.log(((N-df+0.5)/(df+0.5))+1));}chs.forEach(c=>{const v=new Map();for(const [t,f] of c.tf){v.set(t,(f/Math.max(1,c.len))*(idf.get(t)||0));}c.vec=v;});return {chs,idf,idfB,N,avgdl};}function cos(a,b){let d=0,na=0,nb=0;a.forEach((va,t)=>{const vb=b.get(t)||0;d+=va*vb;na+=va*va});b.forEach(vb=>nb+=vb*vb);return (na&&nb)?(d/(Math.sqrt(na)*Math.sqrt(nb))):0}const boot=window.BOOT;const IDX=build(boot.docs);const expand=q=>{const ts=tokens(q).map(stem);const out=new Set(ts);ts.forEach(t=>{if(t.endsWith('s')) out.add(t.replace(/s$/,'')); else out.add(t+'s'); out.add(strip(t));});return Array.from(out)};function bm25(qTerms,ch){const k1=1.2,b=0.75;let s=0;for(const t of qTerms){const idf=IDX.idfB.get(t)||0;const tf=ch.tf.get(t)||0;const denom=tf + k1*(1 - b + b*(ch.len/IDX.avgdl)); if(denom>0) s+=idf*((tf*(k1+1))/denom);}return s}function hybrid(q,ch){const ex=expand(q);const tf=new Map();ex.forEach(t=>tf.set(t,(tf.get(t)||0)+1));const v=new Map();const n=Math.max(1,ex.length);ex.forEach(t=>v.set(t,(tf.get(t)/n)*(IDX.idf.get(t)||0.5)));const cosv=cos(v,ch.vec);const setQ=new Set(ex);const setC=new Set(tokens(ch.text).map(stem));let inter=0;setC.forEach(x=>{if(setQ.has(x)) inter++});const jac= (setQ.size+setC.size-inter)? inter/(setQ.size+setC.size-inter):0;return 0.7*cosv+0.3*jac}function search(q,k=6,thr=0.12){const ex=expand(q);const arr=[];let minB=Infinity,maxB=-Infinity;IDX.chs.forEach(c=>{const h=hybrid(q,c);const b=bm25(ex,c);arr.push({c,h,b});if(b<minB)minB=b;if(b>maxB)maxB=b});const range=(maxB-minB)||1;arr.forEach(o=>o.s = 0.55*o.h + 0.45*((o.b-minB)/range));arr.sort((a,b)=>b.s-a.s);const filt=arr.filter(o=>o.s>=thr).slice(0,k);return (filt.length?filt:arr.slice(0,Math.min(k,6))).map(o=>({c:o.c,s:o.s}))}const log=document.getElementById("log");const push=(role,text)=>{const b=document.createElement("div");b.className="bubble "+(role==="user"?"user":"bot");b.textContent=text;log.appendChild(b);log.scrollTop=log.scrollHeight};function compose(q,hits){const sents=[];const seen=new Set();hits.forEach(x=>x.c.text.split(/(?<=[\\.\\!\\?])\\s+/).forEach(y=>{const t=y.trim();if(t.length<40)return;const k=t.toLowerCase();if(seen.has(k))return;seen.add(k);sents.push({t,sc:x.s});}));sents.sort((a,b)=>b.sc-a.sc);const pick=sents.slice(0,6).map(x=>'• '+x.t).join('\\n');return pick || "Resumen:\\n"+IDX.chs.slice(0,5).map(c=>'• '+c.text.slice(0,160)+'…').join('\\n');}function handle(){const i=document.getElementById("ask");const q=i.value.trim();if(!q)return;i.value="";push("user",q);const hits=search(q,6,0.12);const bullets=compose(q,hits);const head=${JSON.stringify(state.bot.name?`¡Hola! Soy el asistente de ${state.bot.name}.`:"¡Hola!")};const cta=${JSON.stringify(STYLE.cta)};push("bot", head+"\\n\\n"+bullets+"\\n\\n"+cta);}document.getElementById("send").addEventListener("click",handle);document.getElementById("ask").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handle()}});})();</script></body></html>`;
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${(state.bot.name||"Asistente")} — Chat</title><style>:root{--bg:#0f1221;--text:#e7eaff;--brand:#6c8cff;--accent:#22d3ee}*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:radial-gradient(1000px 500px at 10% -10%,rgba(108,140,255,.15),transparent),radial-gradient(800px 400px at 90% -10%,rgba(34,211,238,.08),transparent),var(--bg);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica Neue,Noto Sans,Arial}.wrap{max-width:900px;margin:0 auto;padding:20px}.card{border:1px solid rgba(255,255,255,.08);border-radius:16px;background:rgba(255,255,255,.04);padding:16px}.header{display:flex;gap:10px;align-items:center;margin-bottom:12px}.logo{width:28px;height:28px;border-radius:8px;background:conic-gradient(from 200deg at 60% 40%,var(--brand),var(--accent))}.title{font-weight:700}.chatlog{min-height:60vh;display:flex;flex-direction:column;gap:8px;overflow:auto;padding:6px}.bubble{max-width:80%;padding:10px 12px;border-radius:14px}.user{align-self:flex-end;background:rgba(108,140,255,.18);border:1px solid rgba(108,140,255,.45)}.bot{align-self:flex-start;background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.45)}.composer{display:flex;gap:10px;margin-top:10px}.composer input{flex:1;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(5,8,18,.6);color:var(--text)}.composer button{padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(180deg,rgba(108,140,255,.25),rgba(108,140,255,.06));color:var(--text)}</style></head><body><div class="wrap"><div class="card"><div class="header"><div class="logo"></div><div><div class="title">${(state.bot.name||"Asistente")}</div><div style="opacity:.7">${state.bot.goal||""}</div></div></div><div id="log" class="chatlog"></div><div class="composer"><input id="ask" placeholder="Escribe..."/><button id="send">Enviar</button></div><div style="opacity:.7;margin-top:6px">Modo: RAG local (offline) • Híbrido+BM25</div></div></div><script>window.BOOT=${JSON.stringify(payload)};</script><script>(function(){const STOP=new Set("a al algo algunas algunos ante antes como con contra cual cuando de del desde donde dos el ella ellas ellos en entre era erais éramos eran es esa esas ese esos esta estaba estabais estábamos estaban estar este esto estos fue fui fuimos ha han hasta hay la las le les lo los mas más me mientras muy nada ni nos o os otra otros para pero poco por porque que quien se ser si sí sin sobre soy su sus te tiene tengo tuvo tuve u un una unas unos y ya".split(/\\s+/));const strip=s=>s.normalize('NFD').replace(/[\\u0300-\\u036f]/g,"");const stem=w=>strip(w).toLowerCase().replace(/(mente|ciones|cion|idades|idad|osos?|osas?|ando|iendo|ados?|idas?|es|s)$/,'');const tokens=t=>strip(t.toLowerCase()).replace(/[^a-z0-9áéíóúñü\\s]/gi,' ').split(/\\s+/).filter(w=>w&&!STOP.has(w)&&w.length>1);const chunk=(txt,sz=1200,ov=120)=>{const w=txt.split(/\\s+/);const out=[];for(let i=0;i<w.length;i+=Math.max(1,Math.floor(sz-ov))){const part=w.slice(i,i+sz).join(' ').trim();if(part.length>40) out.push(part);}return out};function build(docs){const vocab=new Map();const chs=[];let total=0;docs.forEach(d=>{chunk(d.text).forEach((t,i)=>{const toks=tokens(t).map(stem);const tf=new Map();toks.forEach(x=>tf.set(x,(tf.get(x)||0)+1));const c={id:d.title+\"#\"+i,text:t,tf,len:toks.length,vec:new Map()};const seen=new Set();toks.forEach(x=>{if(!seen.has(x)){vocab.set(x,(vocab.get(x)||0)+1);seen.add(x);} });chs.push(c);total+=c.len;});});const N=chs.length||1;const avgdl=total/N;const idf=new Map();const idfB=new Map();for(const [term,df] of vocab){idf.set(term,Math.log((N+1)/(df+1))+1);idfB.set(term,Math.log(((N-df+0.5)/(df+0.5))+1));}chs.forEach(c=>{const v=new Map();for(const [t,f] of c.tf){v.set(t,(f/Math.max(1,c.len))*(idf.get(t)||0));}c.vec=v;});return {chs,idf,idfB,N,avgdl};}function cos(a,b){let d=0,na=0,nb=0;a.forEach((va,t)=>{const vb=b.get(t)||0;d+=va*vb;na+=va*va});b.forEach(vb=>nb+=vb*vb);return (na&&nb)?(d/(Math.sqrt(na)*Math.sqrt(nb))):0}const boot=window.BOOT;const IDX=build(boot.docs);const expand=q=>{const ts=tokens(q).map(stem);const out=new Set(ts);ts.forEach(t=>{if(t.endsWith('s')) out.add(t.replace(/s$/,'')); else out.add(t+'s'); out.add(strip(t));});return Array.from(out)};function bm25(qTerms,ch){const k1=1.2,b=0.75;let s=0;for(const t of qTerms){const idf=IDX.idfB.get(t)||0;const tf=ch.tf.get(t)||0;const denom=tf + k1*(1 - b + b*(ch.len/IDX.avgdl)); if(denom>0) s+=idf*((tf*(k1+1))/denom);}return s}function hybrid(q,ch){const ex=expand(q);const tf=new Map();ex.forEach(t=>tf.set(t,(tf.get(t)||0)+1));const v=new Map();const n=Math.max(1,ex.length);ex.forEach(t=>v.set(t,(tf.get(t)/n)*(IDX.idf.get(t)||0.5)));const cosv=cos(v,ch.vec);const setQ=new Set(ex);const setC=new Set(tokens(ch.text).map(stem));let inter=0;setC.forEach(x=>{if(setQ.has(x)) inter++});const jac= (setQ.size+setC.size-inter)? inter/(setQ.size+setC.size-inter):0;return 0.7*cosv+0.3*jac}function search(q,k=6,thr=0.12){const ex=expand(q);const arr=[];let minB=Infinity,maxB=-Infinity;IDX.chs.forEach(c=>{const h=hybrid(q,c);const b=bm25(ex,c);arr.push({c,h,b});if(b<minB)minB=b;if(b>maxB)maxB=b});const range=(maxB-minB)||1;arr.forEach(o=>o.s = 0.55*o.h + 0.45*((o.b-minB)/range));arr.sort((a,b)=>b.s-a.s);const filt=arr.filter(o=>o.s>=thr).slice(0,k);return (filt.length?filt:arr.slice(0,Math.min(k,6))).map(o=>({c:o.c,s:o.s}))}const log=document.getElementById(\"log\");const push=(role,text)=>{const b=document.createElement(\"div\");b.className=\"bubble \"+(role===\"user\"?\"user\":\"bot\");b.textContent=text;log.appendChild(b);log.scrollTop=log.scrollHeight};function compose(q,hits){const sents=[];const seen=new Set();hits.forEach(x=>x.c.text.split(/(?<=[\\.\\!\\?])\\s+/).forEach(y=>{const t=y.trim();if(t.length<40)return;const k=t.toLowerCase();if(seen.has(k))return;seen.add(k);sents.push({t,sc:x.s});}));sents.sort((a,b)=>b.sc-a.sc);const pick=sents.slice(0,6).map(x=>'• '+x.t).join('\\n');return pick || \"Resumen:\\n\"+IDX.chs.slice(0,5).map(c=>'• '+c.text.slice(0,160)+'…').join('\\n');}function handle(){const i=document.getElementById(\"ask\");const q=i.value.trim();if(!q)return;i.value=\"\";push(\"user\",q);const hits=search(q,6,0.12);const bullets=compose(q,hits);const head=${JSON.stringify(state.bot.name?`¡Hola! Soy el asistente de ${state.bot.name}.`:"¡Hola!")};const cta=${JSON.stringify(STYLE.cta)};push(\"bot\", head+\"\\n\\n\"+bullets+\"\\n\\n\"+cta);}document.getElementById(\"send\").addEventListener(\"click\",handle);document.getElementById(\"ask\").addEventListener(\"keydown\",e=>{if(e.key===\"Enter\"&&!e.shiftKey){e.preventDefault();handle()}});})();</script></body></html>`;
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
@@ -608,17 +608,38 @@ function exportStandaloneHtml(){
   a.remove();
 }
 
-/* ===================== JSONL limpio: extracción y generación ===================== */
-function cleanForAnswer(t){
-  return (t||"")
-    .replace(/\[[^\]]*\]\([^)]+\)/g," ")       // [txt](url)
-    .replace(/!\[[^\]]*\]\([^)]+\)/g," ")      // ![img](url)
-    .replace(/https?:\/\/\S+/g," ")            // URLs
-    .replace(/\b(inicio|home|blog|tienda|contacto)\b/gi," ") // menús genéricos
-    .replace(/\s{2,}/g," ")
-    .trim();
+/* ===================== JSONL limpio: limpieza, extracción y generación ===================== */
+// LIMPIEZA AGRESIVA (quita Title/URL/Markdown/menús/cookies/links/imágenes)
+function cleanForAnswer(input){
+  let t = (input||"");
+
+  // Quita URLs primero (evita falsos positivos en teléfonos)
+  t = t.replace(/https?:\/\/\S+/gi, " ");
+
+  // Encabezados de scrapers (r.jina.ai, etc.)
+  t = t.replace(/^(Title|URL Source|Published Time|Markdown Content|Image \d+):.*$/gmi, " ");
+
+  // Markdown: imágenes y links
+  t = t.replace(/!\[[^\]]*\]\([^)]+\)/g, " ");
+  t = t.replace(/\[[^\]]*\]\([^)]+\)/g, " ");
+
+  // Menús/cookies/redes
+  t = t.replace(/\b(inicio|home|blog|tienda|contacto|cart|carrito|mi cuenta|account)\b/gi, " ");
+  t = t.replace(/\b(Accept|Decline|este sitio utiliza cookies.*|Go to [A-Za-z ]+ page)\b/gi, " ");
+
+  // Restos HTML y entidades
+  t = t.replace(/<script[\s\S]*?<\/script>/gi, " ")
+       .replace(/<style[\s\S]*?<\/style>/gi, " ")
+       .replace(/<[^>]+>/g, " ")
+       .replace(/&[a-z]+;/gi, " ");
+
+  // Espacios
+  t = t.replace(/[ \t]+/g, " ").replace(/\s{2,}/g, " ").trim();
+  return t;
 }
-function topSentences(text, max=5, minLen=40){
+
+// Frases “buenas” para respuestas (filtra más ruido)
+function topSentences(text, max=5, minLen=50){
   const out = [];
   const seen = new Set();
   cleanForAnswer(text).split(/(?<=[\.\!\?])\s+/).forEach(s=>{
@@ -626,73 +647,106 @@ function topSentences(text, max=5, minLen=40){
     if (t.length < minLen) return;
     const key = t.toLowerCase();
     if (seen.has(key)) return;
+    if (/^(title|markdown content|url source|published time)\b/i.test(t)) return;
+    if (/(\[|\]|\(|\)|\bimg\b|\bimage\b)/i.test(t)) return;
     seen.add(key);
     out.push(t);
   });
-  return out.slice(0,max);
+  return out.slice(0, max);
 }
-function extractFromText(url, text){
-  const lines = cleanForAnswer(text).split(/\n+/).map(s=>s.trim()).filter(Boolean);
+
+// Extracción robusta desde URL (emails, teléfonos “reales”, horarios, ofertas, políticas, FAQs)
+function extractFromText(url, rawText){
+  const text = cleanForAnswer(rawText);
+  const lines = text.split(/\n+/).map(s=>s.trim()).filter(Boolean);
+
+  // Emails
   const emails = Array.from((text||"").matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)).map(m=>m[0]);
-  const phones = Array.from((text||"").matchAll(/(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,3}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}/g))
-    .map(m=>m[0]).filter(x=>x.replace(/\D/g,'').length>=7);
 
-  const hours = lines.filter(l=>/(horario|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|\b\d{1,2}:\d{2}\b|\bam\b|\bpm\b)/i.test(l)).slice(0,6);
-  const offers = lines.filter(l=>/(precio|plan|paquete|servicio|producto|\$|USD|COP|MXN)/i.test(l)).slice(0,8);
-  const policies = lines.filter(l=>/(pol[ií]tica|t[eé]rminos|condiciones|garant[ií]a|devoluci[oó]n|reembolso|privacidad)/i.test(l)).slice(0,8);
+  // Teléfonos: 7–12 dígitos, normalizados, sin números basura
+  const phoneCandidates = Array.from((text||"").matchAll(/\b(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}\b/g))
+    .map(m=>m[0]);
+  const phones = Array.from(new Set(phoneCandidates
+    .map(p=>p.replace(/[^\d+]/g,""))
+    .filter(d=>{
+      const digits = d.replace(/\D/g,"");
+      const len = digits.length;
+      return len>=7 && len<=12;
+    })
+  ));
 
-  const desc = topSentences(text, 4).join(" ");
+  // Horarios
+  const hours = lines.filter(l=>/(horario|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo|\b\d{1,2}:\d{2}\b|\bam\b|\bpm\b)/i.test(l)).slice(0,8);
 
+  // Ofertas/Precios
+  const offers = lines.filter(l=>/(precio|plan|paquete|servicio|producto|\$|\bUSD\b|\bCOP\b|\bMXN\b)/i.test(l)).slice(0,12);
+
+  // Políticas
+  const policies = lines.filter(l=>/(pol[ií]tica|t[eé]rminos|condiciones|garant[ií]a|devoluci[oó]n|reembolso|privacidad)/i.test(l)).slice(0,12);
+
+  // Descripción compacta
+  const desc = topSentences(text, 4, 50).join(" ");
+
+  // FAQs (línea con ? + siguiente línea como respuesta)
   const faqs = [];
   for (let i=0;i<lines.length-1;i++){
     const q = lines[i], a = lines[i+1];
     if (/\?/.test(q) && a && !/\?$/.test(a)) {
-      const ans = topSentences(a,2,20).join(" ");
+      const ans = topSentences(a, 2, 30).join(" ");
       if (ans) faqs.push({ q: q.replace(/\s+/g," ").trim(), a: ans });
     }
   }
 
+  // Contacto legible
   const contactParts = [];
   if (emails.length) contactParts.push(`Email(s): ${[...new Set(emails)].join(", ")}`);
   if (phones.length) contactParts.push(`Teléfono(s): ${[...new Set(phones)].join(", ")}`);
-  const contactLines = lines.filter(l=>/(whats?app|contacto|direcci[oó]n|ubicaci[oó]n|soporte|correo|email|tel[eé]fono|celular)/i.test(l)).slice(0,4);
-  const contact = [ ...contactParts, ...contactLines ].join(" • ");
+  const contactLines = lines.filter(l=>/(whats?app|contacto|direcci[oó]n|ubicaci[oó]n|soporte|correo|email|tel[eé]fono|celular)/i.test(l)).slice(0,3);
+  const contact = [ ...contactParts, ...contactLines ].filter(Boolean).join(" • ");
 
+  // Nombre aproximado por dominio
   let name=""; try { const host = new URL(url).hostname.replace(/^www\./,''); name = host.split('.')[0]; } catch {}
   name = name ? (name.charAt(0).toUpperCase()+name.slice(1)) : "";
 
   return { name, desc, contact, hours, offers, policies, faqs };
 }
+
+// Pares canónicos (limpios) para JSONL
 function pairsCanonicalFromBuckets(b){
-  const asBullets = (arr)=> arr.slice(0,5).map((x,i)=> `${i+1}. ${x}`).join("\n");
+  const bullets = (arr, n=5)=> arr.slice(0,n).map((x,i)=> `${i+1}. ${x}`).join("\n");
   const pairs = [];
 
   if (b.desc) {
     pairs.push({ q: "¿Qué hacen? | ¿Qué es esta empresa? | ¿A qué se dedican?", a: b.desc, tags:["about"], src:"perfil" });
   }
-  if (b.offers?.length){
-    pairs.push({ q: "¿Qué productos o servicios ofrecen? | ¿Cuáles son los planes y precios?", a: asBullets(b.offers), tags:["oferta","precios"], src:"oferta" });
+  if (b.offers && b.offers.length){
+    pairs.push({ q: "¿Qué productos o servicios ofrecen? | ¿Cuáles son los planes y precios?", a: bullets(b.offers, 6), tags:["oferta","precios"], src:"oferta" });
   }
   if (b.contact){
     pairs.push({ q: "¿Cómo los contacto? | ¿Tienen WhatsApp o teléfono? | ¿Cuál es el correo?", a: b.contact, tags:["contacto"], src:"contacto" });
   }
-  if (b.hours?.length){
-    pairs.push({ q: "¿Cuáles son los horarios de atención? | ¿Abren fines de semana?", a: asBullets(b.hours), tags:["horarios"], src:"operación" });
+  if (b.hours && b.hours.length){
+    pairs.push({ q: "¿Cuáles son los horarios de atención? | ¿Abren fines de semana?", a: bullets(b.hours, 6), tags:["horarios"], src:"operación" });
   }
-  if (b.policies?.length){
-    pairs.push({ q: "¿Tienen políticas de garantía, cambios o devoluciones?", a: asBullets(b.policies), tags:["políticas"], src:"políticas" });
+  if (b.policies && b.policies.length){
+    pairs.push({ q: "¿Tienen políticas de garantía, cambios o devoluciones?", a: bullets(b.policies, 6), tags:["políticas"], src:"políticas" });
   }
-  (b.faqs||[]).slice(0,6).forEach(f=>{
-    if (f.q && f.a) pairs.push({ q: f.q, a: f.a, tags:["faq"], src:"faq" });
+  (b.faqs||[]).slice(0,8).forEach(f=>{
+    const Q = (f.q||"").trim(); const A = (f.a||"").trim();
+    if (Q && A) pairs.push({ q: Q, a: A, tags:["faq"], src:"faq" });
   });
+
+  // Saludo robusto
   pairs.push({
     q: "hola | buenas | hey | hello | hi",
     a: `¡Hola! Soy el asistente virtual${state.bot.name?` de ${state.bot.name}`:""}. Puedo ayudarte con: productos/servicios, precios, horarios, contacto y soporte. ¿Qué necesitas?`,
     tags:["saludo"], src:"sistema"
   });
 
-  return pairs;
+  return pairs.filter(p=> p.q && p.a);
 }
+
+// Wizard → construir pares desde campos
 function pairsFromWizard(){
   const name = ($("w_name")?.value||"").trim();
   const tone = ($("w_tone")?.value||"").trim() || "Cercano y profesional.";
@@ -716,7 +770,7 @@ function pairsFromWizard(){
   const pairs = pairsCanonicalFromBuckets(buckets);
 
   if (name || desc) {
-    pairs.unshift({ q: `¿Quiénes son ${name||"ustedes"}?`, a: `${desc}\n\nTono: ${tone}`, tags:["about"], src:"perfil" });
+    pairs.unshift({ q: `¿Quiénes son ${name||"ustedes"}?`, a: `${desc}\n\nTono del asistente: ${tone}`, tags:["about"], src:"perfil" });
   }
   return pairs;
 }
