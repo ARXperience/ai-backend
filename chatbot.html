@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Studio Chatbot v2 — Entrenamiento por archivos y web</title>
+  <title>Studio Chatbot v2 — Entrena por archivos, URLs y JSONL</title>
   <style>
     :root{
       --bg:#0f1221;--panel:#141935;--muted:#8b93b2;--text:#e7eaff;--brand:#6c8cff;--accent:#22d3ee;--ok:#22c55e;--warn:#f59e0b;
@@ -16,7 +16,7 @@
     aside{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));border:1px solid rgba(255,255,255,.06);border-radius:var(--br);padding:18px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-height:0}
     main{display:grid;grid-template-rows:auto 1fr;gap:var(--gap)}
     header{display:flex;gap:10px;align-items:center;background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));border:1px solid rgba(255,255,255,.06);border-radius:var(--br);padding:16px 18px;box-shadow:var(--shadow)}
-    .logo{width:36px;height:36px;border-radius:10px;background:conic-gradient(from 200deg at 60% 40%,var(--brand),var(--accent));box-shadow:0 0 0 2px rgba(255,255,255,.05) inset}
+    .logo{width:36px;height:36px;border-radius:10px;background:conic-gradient(from 200deg at 60% 40%,var(--brand),var(--accent))}
     .title{font-weight:700}
     .section{margin-top:12px}
     .muted{color:var(--muted)}
@@ -53,6 +53,11 @@
     .mini header{border:0;border-bottom:1px solid rgba(255,255,255,.08);border-radius:0}
     .mini .chatlog{background:rgba(0,0,0,.2)}
     .mini.show{display:grid}
+    /* Modal asistente */
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;place-items:center;z-index:10000}
+    .modal.show{display:grid}
+    .modal .box{width:min(900px,92vw);max-height:90vh;overflow:auto;background:var(--panel);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:16px;box-shadow:var(--shadow)}
+    .steps{display:grid;gap:10px}
     @media (max-width:1100px){.app{grid-template-columns:1fr}.panels{grid-template-columns:1fr}}
   </style>
 </head>
@@ -63,15 +68,16 @@
         <div class="logo"></div>
         <div>
           <div class="title">Studio Chatbot v2</div>
-          <div class="muted small">Nombra tu bot, define objetivo y entrena con archivos o web</div>
+          <div class="muted small">Entrena con archivos, URLs, objetivo/notas y genera JSONL</div>
         </div>
       </div>
 
       <div class="section"><div class="pill">Estado: <strong id="modelStatus">Sin entrenar</strong></div></div>
+
       <div class="section"><div class="small muted">Nombre del bot</div><input id="botName" type="text" placeholder="Ej: Asistente Comercial" /></div>
-      <div class="section"><div class="small muted">Objetivo del bot</div><textarea id="botGoal" placeholder="Ej: Responder preguntas frecuentes y agendar demos"></textarea></div>
-      <div class="section"><div class="small muted">Información adicional</div><textarea id="botNotes" placeholder="Estilo de tono, límites, políticas, etc."></textarea></div>
-      <div class="section"><div class="small muted">Instrucción del sistema (no se mostrará)</div><textarea id="systemPrompt" placeholder="Reglas internas del bot. No se pegan en la respuesta."></textarea><div class="small muted">⚠️ No se incluirá en la respuesta</div></div>
+      <div class="section"><div class="small muted">Objetivo del bot</div><textarea id="botGoal" placeholder="Ej: Responder FAQs, agendar demos y orientar compras."></textarea></div>
+      <div class="section"><div class="small muted">Información adicional</div><textarea id="botNotes" placeholder="Políticas, tono, procesos, áreas, etc."></textarea></div>
+      <div class="section"><div class="small muted">Instrucción del sistema (no se mostrará)</div><textarea id="systemPrompt" placeholder="Reglas internas."></textarea><div class="small muted">⚠️ No se pegará literalmente en la respuesta</div></div>
 
       <div class="section">
         <div class="small muted">Entrenamiento por archivos</div>
@@ -100,16 +106,13 @@
       </div>
 
       <div class="section">
-        <div class="small muted">IA opcional (backend propio)</div>
-        <div class="row small muted"><label><input type="checkbox" id="allowWeb" checked /> Permitir apoyo web</label><label><input type="checkbox" id="strictContext" checked /> Contexto estricto</label></div>
+        <div class="small muted">Herramientas</div>
+        <div class="row"><button id="btnDatasetWizard" class="ok">Asistente de dataset (JSONL)</button><button id="btnExportHtml" class="ghost">Exportar HTML estático</button></div>
+        <div class="small muted">IA opcional (si tienes backend): <label class="row small muted"><input type="checkbox" id="allowWeb" checked /> Permitir apoyo web</label><label class="row small muted"><input type="checkbox" id="strictContext" checked /> Contexto estricto</label></div>
       </div>
 
       <div class="section">
-        <button id="btnExportHtml" class="ok">Exportar HTML (estático)</button>
-        <div class="small muted">Descarga un archivo único con el chat y todo el conocimiento incrustado.</div>
-      </div>
-
-      <div class="section"><div class="small muted">Snippet para widget</div>
+        <div class="small muted">Snippet para widget</div>
         <details><summary>Ver código</summary><pre class="small muted" id="embedSnippet"></pre></details>
       </div>
     </aside>
@@ -140,6 +143,7 @@
     </main>
   </div>
 
+  <!-- Mini widget -->
   <div class="launcher" id="launcher" title="Abrir chat">💬</div>
   <div class="mini" id="mini">
     <header class="row spread">
@@ -150,7 +154,65 @@
     <div class="composer"><input id="miniAsk" class="input" type="text" placeholder="Pregunta aquí..." /><button id="miniSend" class="primary">Enviar</button></div>
   </div>
 
-  <!-- Si quieres leer PDF locales, añade pdfjs-dist y expón window.pdfjsLib -->
+  <!-- Modal: Asistente de dataset -->
+  <div class="modal" id="datasetModal">
+    <div class="box">
+      <div class="row spread"><div><strong>Asistente de dataset (.jsonl)</strong></div><button id="wizClose" class="ghost">Cerrar</button></div>
+      <div class="small muted">Responde unas preguntas y te genero Q&A listas para entrenar (descargar o agregar al proyecto).</div>
+      <div class="steps">
+        <div class="section grid2">
+          <div>
+            <div class="small muted">Nombre de la marca</div>
+            <input id="w_name" type="text" placeholder="Ej: Mi Empresa" />
+          </div>
+          <div>
+            <div class="small muted">Tono del asistente</div>
+            <input id="w_tone" type="text" placeholder="Cercano y profesional" />
+          </div>
+        </div>
+        <div class="section">
+          <div class="small muted">Descripción breve (qué haces, para quién, diferencial)</div>
+          <textarea id="w_desc" placeholder="2–4 frases claras"></textarea>
+        </div>
+        <div class="section grid2">
+          <div>
+            <div class="small muted">Contacto (WhatsApp / Tel / Email)</div>
+            <input id="w_contact" type="text" placeholder="Whatsapp +57..., Tel ..., Email ..., Dirección ..." />
+          </div>
+          <div>
+            <div class="small muted">Horarios / Cobertura</div>
+            <input id="w_hours" type="text" placeholder="L–V 8–6, sáb 9–1. Envios a ..." />
+          </div>
+        </div>
+        <div class="section">
+          <div class="small muted">Productos/Servicios (uno por línea: nombre — precio o rango — notas)</div>
+          <textarea id="w_offers" placeholder="Plan Básico — $ — incluye...\nServicio X — desde $ — ..."></textarea>
+        </div>
+        <div class="section">
+          <div class="small muted">Políticas claves (garantía, devoluciones, tiempos, requisitos)</div>
+          <textarea id="w_policies" placeholder="Ej: garantía 30 días; devoluciones dentro de 5 días; soporte 24/7..."></textarea>
+        </div>
+        <div class="section">
+          <div class="small muted">FAQs (formato: pregunta ?| respuesta)</div>
+          <textarea id="w_faqs" placeholder="¿Cómo compro?|Añade al carrito y paga...\n¿Hacen envíos?|Sí, a ..."></textarea>
+        </div>
+        <div class="section row">
+          <button id="wizPreview" class="primary">Generar vista previa</button>
+          <button id="wizAdd" class="ok">Agregar al proyecto</button>
+          <button id="wizDownload" class="ghost">Descargar JSONL</button>
+        </div>
+        <div class="section">
+          <div class="small muted">Vista previa</div>
+          <textarea id="w_preview" readonly style="min-height:160px"></textarea>
+        </div>
+        <div class="section">
+          <button id="wizFromProfile" class="ghost">Crear JSONL desde Objetivo/Notas</button>
+          <div class="small muted">Toma tu Objetivo/Notas actuales y genera un set básico de Q&A.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
