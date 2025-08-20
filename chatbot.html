@@ -58,7 +58,6 @@
 </head>
 <body>
   <div class="app">
-    <!-- ===================== ASIDE ===================== -->
     <aside>
       <div class="row" style="gap:12px;align-items:center">
         <div class="logo"></div>
@@ -70,26 +69,10 @@
 
       <div class="section"><div class="pill">Estado: <strong id="modelStatus">Sin entrenar</strong></div></div>
 
-      <div class="section">
-        <div class="small muted">Nombre del bot</div>
-        <input id="botName" type="text" placeholder="Ej: Asistente de Mi Marca" />
-      </div>
-
-      <div class="section">
-        <div class="small muted">Objetivo del bot</div>
-        <textarea id="botGoal" placeholder="¿Qué debe lograr el bot?"></textarea>
-      </div>
-
-      <div class="section">
-        <div class="small muted">Información adicional</div>
-        <textarea id="botNotes" placeholder="Tono, límites, guías de redacción…"></textarea>
-      </div>
-
-      <div class="section">
-        <div class="small muted">Instrucción del sistema (no se mostrará)</div>
-        <textarea id="systemPrompt" placeholder="Instrucciones internas"></textarea>
-        <div class="small muted">⚠️ No se incluirá en la respuesta</div>
-      </div>
+      <div class="section"><div class="small muted">Nombre del bot</div><input id="botName" type="text" placeholder="Ej: Asistente de Mi Marca" /></div>
+      <div class="section"><div class="small muted">Objetivo del bot</div><textarea id="botGoal" placeholder="¿Qué debe lograr el bot?"></textarea></div>
+      <div class="section"><div class="small muted">Información adicional</div><textarea id="botNotes" placeholder="Tono, límites, guías de redacción…"></textarea></div>
+      <div class="section"><div class="small muted">Instrucción del sistema (no se mostrará)</div><textarea id="systemPrompt" placeholder="Instrucciones internas"></textarea><div class="small muted">⚠️ No se incluirá en la respuesta</div></div>
 
       <div class="section">
         <div class="small muted">Entrenamiento por archivos</div>
@@ -137,7 +120,6 @@
       </div>
     </aside>
 
-    <!-- ===================== MAIN ===================== -->
     <main>
       <header class="row spread">
         <div class="row" style="gap:10px">
@@ -166,7 +148,7 @@
         </section>
       </div>
 
-      <!-- ========== WIZARD JSONL ========== -->
+      <!-- Wizard JSONL -->
       <section class="card" style="margin-top:14px">
         <h3>Wizard JSONL (preguntas y respuestas entrenables)</h3>
         <div class="sub">Autocompleta desde una URL, edita los campos y genera un dataset JSONL limpio.</div>
@@ -245,10 +227,9 @@
     <div class="composer"><input id="miniAsk" class="input" type="text" placeholder="Pregunta aquí..." /><button id="miniSend" class="primary">Enviar</button></div>
   </div>
 
-  <!-- (Opcional) PDF.js si deseas leer PDFs locales -->
+  <!-- (Opcional) PDF.js para PDFs locales -->
   <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.2.67/pdf.min.js"></script> -->
-
-  <!-- Tu lógica -->
   <script src="app.js"></script>
 </body>
 </html>
+
